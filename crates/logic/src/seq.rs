@@ -23,6 +23,8 @@ pub enum SeqVerdict {
 #[derive(Debug, Clone, Default)]
 pub struct SeqTracker {
     boot: Option<[u8; 16]>,
+    /// Recent previous boots: their frames are late history, not a new epoch.
+    previous: std::collections::VecDeque<[u8; 16]>,
     highest: Option<u64>,
     seen: BTreeSet<u64>,
     /// Confirmed missing sequence numbers (fell out of the reorder window unseen).
@@ -35,6 +37,15 @@ pub struct SeqTracker {
 impl SeqTracker {
     pub fn observe(&mut self, boot: [u8; 16], seq: u64) -> SeqVerdict {
         if self.boot != Some(boot) {
+            if self.previous.contains(&boot) {
+                return SeqVerdict::Late;
+            }
+            if let Some(old) = self.boot {
+                if self.previous.len() >= 4 {
+                    self.previous.pop_front();
+                }
+                self.previous.push_back(old);
+            }
             self.boot = Some(boot);
             self.highest = None;
             self.seen.clear();
@@ -97,8 +108,9 @@ mod tests {
         t.observe(b, 10 + REORDER_WINDOW + 1);
         assert_eq!(t.gaps, 6, "4..=9 never arrived");
         assert_eq!(t.observe(b, 1), SeqVerdict::Late);
-        // New boot resets.
+        // New boot resets; frames from the previous boot are late history.
         assert_eq!(t.observe([2; 16], 1), SeqVerdict::New);
+        assert_eq!(t.observe(b, 5), SeqVerdict::Late);
         // A hostile jump to u64::MAX is an anomaly, not 2^64 gaps (and returns quickly).
         let g = t.gaps;
         assert_eq!(t.observe([2; 16], u64::MAX), SeqVerdict::New);

@@ -127,8 +127,12 @@ impl TargetHealth {
     fn degraded_reason(&self, s: &WindowStats, th: &Thresholds) -> Option<String> {
         if s.eligible >= th.loss_min_samples {
             if let Some(l) = s.loss_pct {
-                if l > th.loss_degraded_pct {
-                    return Some(format!("loss {l:.1}% over {} eligible probes", s.eligible));
+                // Require statistical evidence: the 99% one-sided Wilson lower bound of
+                // the loss rate must exceed the threshold (random background loss in a
+                // small window must not raise an alarm).
+                let lb = wilson_lower(s.timeouts, s.eligible) * 100.0;
+                if l > th.loss_degraded_pct && lb > th.loss_degraded_pct && s.timeouts >= 3 {
+                    return Some(format!("loss {l:.1}% (lower bound {lb:.1}%) over {} eligible probes", s.eligible));
                 }
             }
         }
@@ -142,7 +146,12 @@ impl TargetHealth {
             }
         }
         if self.is_dns && s.dns_bad >= th.dns_failures_degraded {
-            return Some(format!("{} DNS answers invalid/failed in window", s.dns_bad));
+            // Proportional, not an absolute count: 3 bad answers out of 10 is an
+            // incident, 3 out of 150 is background noise.
+            let lb = wilson_lower(s.dns_bad, s.eligible.max(s.dns_bad)) * 100.0;
+            if lb > th.loss_degraded_pct {
+                return Some(format!("{} of {} DNS answers invalid/failed (lower bound {lb:.1}%)", s.dns_bad, s.eligible));
+            }
         }
         None
     }
@@ -176,6 +185,22 @@ impl TargetHealth {
         }
         self.since = now;
     }
+}
+
+/// One-sided 99% Wilson score lower bound for a binomial proportion. The high
+/// confidence keeps the fleet-wide false-alarm rate low (many targets x many windows);
+/// the trade-off is that ~7% loss is needed to confirm degradation over 150 probes.
+pub fn wilson_lower(k: u32, n: u32) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+    let (k, n) = (f64::from(k), f64::from(n));
+    let z = 2.3263f64;
+    let p = k / n;
+    let denom = 1.0 + z * z / n;
+    let center = p + z * z / (2.0 * n);
+    let margin = z * (p * (1.0 - p) / n + z * z / (4.0 * n * n)).sqrt();
+    ((center - margin) / denom).max(0.0)
 }
 
 /// Liveness from the freshest authenticated frame (spec §8.1: retained status alone
@@ -288,6 +313,26 @@ mod tests {
             h.record(i * 30_000, Outcome::Success, Some(2000), Some(false), false, &t);
         }
         assert_eq!(h.health, Health::Failed);
+    }
+
+    #[test]
+    fn background_loss_does_not_degrade_but_real_loss_does() {
+        let t = th();
+        // 4 timeouts in 150 (2.7%): consistent with ~0.5% background loss -> no alarm.
+        let mut h = TargetHealth::new(300_000, false);
+        for i in 0..150i64 {
+            let lost = i % 37 == 5;
+            h.record(i * 2000, if lost { Outcome::Timeout } else { Outcome::Success }, (!lost).then_some(900), None, false, &t);
+        }
+        assert_eq!(h.health, Health::Healthy, "{}", h.reason);
+        // 12% loss is unambiguous.
+        let mut h = TargetHealth::new(300_000, false);
+        for i in 0..150i64 {
+            let lost = i % 8 == 3;
+            h.record(i * 2000, if lost { Outcome::Timeout } else { Outcome::Success }, (!lost).then_some(900), None, false, &t);
+        }
+        assert_eq!(h.health, Health::Degraded);
+        assert!(wilson_lower(0, 10) < 1e-9 && wilson_lower(10, 10) > 0.6);
     }
 
     #[test]

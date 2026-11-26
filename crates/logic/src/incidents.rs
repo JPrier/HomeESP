@@ -164,7 +164,11 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
             let mgmt_healthy = !mgmt.is_empty() && mgmt.iter().all(|t| t.health == Health::Healthy);
             let radio = s.radios.iter().find(|r| r.ap == ap);
             let radio_absent = radio.is_some_and(|r| r.absent_for.len() >= 2 && r.seen_by.is_empty());
-            if affected.len() >= 2 || (radio_absent && mgmt_healthy) {
+            // Roams are only supporting evidence; a hypothesis needs a *current*
+            // symptom (a node still missing, failing management, or an absent radio),
+            // otherwise it could never resolve while old roams remain in the window.
+            let current = !missing.is_empty() || mgmt_failed || radio_absent;
+            if current && (affected.len() >= 2 || (radio_absent && mgmt_healthy)) {
                 let mut evidence: Vec<String> = Vec::new();
                 for n in &missing {
                     evidence.push(format!("node {} missing; last associated with {ap}", n.id));
@@ -336,7 +340,7 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
                 alternatives: vec!["upstream forwarder outage".into(), "local zone misconfiguration".into()],
                 next_check: "compare local-record vs uncached profiles; inspect Unbound status".into(),
             });
-        } else if wired_dns_ok {
+        } else if wired_dns_ok && (vantages.len() >= 2 || dns_bad.iter().any(|t| t.health == Health::Failed)) {
             out.push(Hypothesis {
                 key: "dns:client-path".into(),
                 kind: HypKind::DnsClientPath,
@@ -351,7 +355,7 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
                 alternatives: vec!["UDP loss on Wi-Fi".into(), "resolver rate limiting of wireless clients".into()],
                 next_check: "compare gateway RTT/loss on the same vantages and UDP vs TCP DNS".into(),
             });
-        } else {
+        } else if !wired_dns_ok && (vantages.len() >= 2 || dns_bad.iter().any(|t| t.health == Health::Failed)) {
             out.push(Hypothesis {
                 key: "dns:unknown".into(),
                 kind: HypKind::UnknownDegradation,
@@ -375,7 +379,12 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
         .copied()
         .filter(|t| !is_wired(t) && (t.kind == "icmp" || t.kind == "udp_echo") && t.health == Health::Degraded)
         .collect();
-    if !ip_bad_wireless.is_empty() {
+    // Corroboration: >= 2 vantages, or >= 2 degraded targets at one vantage. A single
+    // marginal target at one node (likely chance at fleet scale) stays visible as
+    // degraded target health but does not open an incident.
+    let bad_vantages: BTreeSet<&str> = ip_bad_wireless.iter().map(|t| t.vantage.as_str()).collect();
+    let corroborated = bad_vantages.len() >= 2 || ip_bad_wireless.len() >= 2;
+    if corroborated {
         let wired: Vec<&TargetView> =
             tv.iter().copied().filter(|t| is_wired(t) && (t.kind == "icmp" || t.kind == "tcp")).collect();
         let wired_bad = wired.iter().any(|t| t.health.is_bad());

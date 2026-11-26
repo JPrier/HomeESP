@@ -185,6 +185,16 @@ impl Engine {
         &self.cfg
     }
 
+    /// Restore last-seen times from storage after a restart so a node that was
+    /// already silent is still detected as missing (instead of `unknown` forever).
+    pub fn seed_last_seen(&mut self, node: &str, at: UnixMs) {
+        if let Some(n) = self.nodes.get_mut(node) {
+            if n.last_seen.is_none() {
+                n.last_seen = Some(at);
+            }
+        }
+    }
+
     pub fn incident_counter(&self) -> u64 {
         self.incidents.counter()
     }

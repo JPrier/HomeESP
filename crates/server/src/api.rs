@@ -619,6 +619,16 @@ async fn admin_config_put(State(app): State<App>, h: HeaderMap, Json(b): Json<Co
         Ok(c) => c,
         Err(e) => return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"code": "invalid", "issues": [{"path": "", "message": e.to_string()}]}))).into_response()),
     };
+    // Security-sensitive sections (secret file paths, broker, notifier endpoints,
+    // integrations, watchdog) can only be changed on the host, never over HTTP.
+    let locked = locked_section_changes(&app.cfg, &new_cfg);
+    if !locked.is_empty() {
+        let issues: Vec<Value> = locked
+            .iter()
+            .map(|s| json!({"path": s, "message": "this section is immutable via the API; edit the file on the host"}))
+            .collect();
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"code": "locked_section", "issues": issues}))).into_response());
+    }
     let issues = new_cfg.validate();
     if !issues.is_empty() {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(json!({"code": "invalid", "issues": issues}))).into_response());
@@ -643,6 +653,42 @@ async fn admin_config_put(State(app): State<App>, h: HeaderMap, Json(b): Json<Co
         .map_err(ApiError::internal)?;
     log_audit(&app, role, "config.apply", None, json!({"revision": rev, "sha256": sha})).await;
     ok(json!({"applied": true, "revision": rev, "restart_required": true}))
+}
+
+/// Names of security-sensitive config sections that differ between `a` and `b`.
+pub fn locked_section_changes(a: &ho_domain::SiteConfig, b: &ho_domain::SiteConfig) -> Vec<&'static str> {
+    let mut v = Vec::new();
+    let differ = |x: &dyn erased::Ser, y: &dyn erased::Ser| x.json() != y.json();
+    if differ(&a.server, &b.server) {
+        v.push("server");
+    }
+    if differ(&a.mqtt, &b.mqtt) {
+        v.push("mqtt");
+    }
+    if differ(&a.notifications.notifiers, &b.notifications.notifiers) {
+        v.push("notifications.notifiers");
+    }
+    if differ(&a.integrations, &b.integrations) {
+        v.push("integrations");
+    }
+    if differ(&a.watchdog, &b.watchdog) {
+        v.push("watchdog");
+    }
+    if a.site_id != b.site_id {
+        v.push("site_id");
+    }
+    v
+}
+
+mod erased {
+    pub trait Ser {
+        fn json(&self) -> serde_json::Value;
+    }
+    impl<T: serde::Serialize> Ser for T {
+        fn json(&self) -> serde_json::Value {
+            serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
+        }
+    }
 }
 
 async fn audit_list(app: &App) -> Result<Value, ApiError> {
