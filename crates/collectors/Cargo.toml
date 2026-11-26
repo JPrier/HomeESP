@@ -24,4 +24,5 @@ reqwest.workspace = true
 socket2 = { version = "0.5", features = ["all"] }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 hex.workspace = true

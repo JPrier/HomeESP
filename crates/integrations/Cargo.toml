@@ -17,7 +17,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 reqwest.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
 
 [dev-dependencies]
-tokio.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }

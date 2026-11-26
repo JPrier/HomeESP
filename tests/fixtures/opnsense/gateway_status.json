@@ -1,0 +1,1 @@
+{"items":[{"name":"WAN_DHCP","address":"192.0.2.1","status":"none","status_translated":"Online","loss":"0.0 %","stddev":"0.8 ms","delay":"11.2 ms","monitor":"192.0.2.254"},{"name":"WAN_DHCP6","address":"~","status":"down","status_translated":"Offline","loss":"~","stddev":"~","delay":"~","monitor":"~"}],"status":"ok"}

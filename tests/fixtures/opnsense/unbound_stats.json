@@ -1,0 +1,1 @@
+{"data":{"total":{"num":{"queries":"12345","cachehits":"10000","cachemiss":"2345"},"recursion":{"time":{"avg":"0.041","median":"0.020"}}},"num":{"answer":{"rcode":{"NOERROR":"12000","SERVFAIL":"3","NXDOMAIN":"342"}}}}}
