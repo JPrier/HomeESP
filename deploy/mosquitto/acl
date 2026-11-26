@@ -1,0 +1,26 @@
+# Home Observatory broker ACL (spec §8.1, §16). Node usernames equal node ids so
+# `%u` pins every node to its own topic subtree. Nodes may never publish desired
+# config or ACKs, and may never read another node's data.
+# Replace "home" if your site id differs.
+
+# ---- nodes (pattern rules apply to every authenticated user)
+pattern write observatory/v1/home/nodes/%u/telemetry
+pattern write observatory/v1/home/nodes/%u/events
+pattern write observatory/v1/home/nodes/%u/status
+pattern write observatory/v1/home/nodes/%u/capabilities
+pattern write observatory/v1/home/nodes/%u/config/reported
+pattern write observatory/v1/home/nodes/%u/ota/reported
+pattern read  observatory/v1/home/nodes/%u/config/desired
+pattern read  observatory/v1/home/nodes/%u/ack
+pattern read  observatory/v1/home/nodes/%u/ota/desired
+
+# ---- central server
+user observatory-server
+topic readwrite observatory/v1/#
+topic readwrite homeassistant/#
+
+# ---- Home Assistant (separate credential, sanitized derived state only)
+user homeassistant
+topic read homeassistant/#
+topic read observatory/v1/home/ha/#
+topic write homeassistant/status
