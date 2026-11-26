@@ -1,0 +1,14 @@
+/target
+**/node_modules
+/dashboard/dist
+/firmware/.pio
+/firmware/include/secrets.h
+/local/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+secrets/
+*.pem
+*.key
+!deploy/mosquitto/README.md

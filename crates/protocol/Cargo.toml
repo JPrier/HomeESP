@@ -1,0 +1,20 @@
+[package]
+name = "ho-protocol"
+description = "Home Observatory wire protocol v1: no_std, allocation-free framing and codecs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+std = []
+
+[dependencies]
+
+[dev-dependencies]
+proptest.workspace = true
+hex.workspace = true
