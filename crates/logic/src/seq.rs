@@ -6,6 +6,9 @@ use std::collections::BTreeSet;
 
 /// Sequences that can arrive out of order before a gap is declared.
 pub const REORDER_WINDOW: u64 = 64;
+/// A forward jump larger than this is treated as an anomaly (tracking restarts)
+/// rather than as millions of missing reports.
+pub const MAX_FORWARD_JUMP: u64 = 100_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SeqVerdict {
@@ -25,6 +28,8 @@ pub struct SeqTracker {
     /// Confirmed missing sequence numbers (fell out of the reorder window unseen).
     pub gaps: u64,
     pub duplicates: u64,
+    /// Implausible forward jumps (counted, not converted into gaps).
+    pub jumps: u64,
 }
 
 impl SeqTracker {
@@ -48,14 +53,20 @@ impl SeqTracker {
             return SeqVerdict::Duplicate;
         }
         if seq > high {
+            if seq - high > MAX_FORWARD_JUMP {
+                self.jumps += 1;
+                self.highest = Some(seq);
+                self.seen.clear();
+                self.seen.insert(seq);
+                return SeqVerdict::New;
+            }
             self.highest = Some(seq);
             let new_floor = seq.saturating_sub(REORDER_WINDOW);
-            // Count sequences leaving the window unseen as gaps, then prune.
+            // Count sequences leaving the window unseen as gaps (arithmetically, O(window)).
             let lo = floor.max(self.seen.first().copied().unwrap_or(floor));
-            for s in lo..new_floor {
-                if !self.seen.contains(&s) {
-                    self.gaps += 1;
-                }
+            if new_floor > lo {
+                let seen_in = self.seen.range(lo..new_floor).count() as u64;
+                self.gaps += (new_floor - lo).saturating_sub(seen_in);
             }
             self.seen = self.seen.split_off(&new_floor);
         }
@@ -88,6 +99,11 @@ mod tests {
         assert_eq!(t.observe(b, 1), SeqVerdict::Late);
         // New boot resets.
         assert_eq!(t.observe([2; 16], 1), SeqVerdict::New);
+        // A hostile jump to u64::MAX is an anomaly, not 2^64 gaps (and returns quickly).
+        let g = t.gaps;
+        assert_eq!(t.observe([2; 16], u64::MAX), SeqVerdict::New);
+        assert_eq!(t.gaps, g);
+        assert_eq!(t.jumps, 1);
     }
 
     proptest! {

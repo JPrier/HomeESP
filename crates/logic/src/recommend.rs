@@ -79,7 +79,7 @@ pub fn recommendations(s: &EngineSnapshot) -> Vec<Recommendation> {
             }
         }
         if let Some(sys) = &n.state.last_system {
-            if sys.drops_overflow + sys.drops_budget + sys.drops_expired > 0 {
+            if u32::from(sys.drops_overflow) + u32::from(sys.drops_budget) + u32::from(sys.drops_expired) > 0 {
                 out.push(Recommendation {
                     id: format!("node-drops:{}", n.id),
                     title: format!("Node {} dropped telemetry", n.id),

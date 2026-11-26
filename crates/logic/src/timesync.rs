@@ -14,6 +14,9 @@ const WINDOW: usize = 64;
 const DRIFT_PPM: i64 = 100;
 /// Floor for reported uncertainty (MQTT + scheduling granularity).
 const MIN_UNCERTAINTY_MS: i64 = 20;
+/// Oldest plausible sample age relative to receipt (offline buffering is minutes;
+/// anything older is clamped and flagged maximally uncertain).
+pub const MAX_SAMPLE_AGE_MS: i64 = 86_400_000;
 
 #[derive(Debug, Clone, Default)]
 pub struct OffsetEstimator {
@@ -54,7 +57,7 @@ impl OffsetEstimator {
         let mut v: Vec<i64> = self.samples.iter().copied().collect();
         v.sort_unstable();
         let med = v.get(v.len() / 2).copied().unwrap_or(min);
-        med - min
+        med.saturating_sub(min)
     }
 
     /// Whether the estimate is good enough for cross-node fusion.
@@ -72,9 +75,15 @@ impl OffsetEstimator {
         };
         let mono = i64::try_from(sent_mono_ms).unwrap_or(i64::MAX);
         let sample_mono = mono.saturating_sub(i64::from(age_ms));
-        let observed = sample_mono.saturating_add(min).min(received_at);
+        let raw = sample_mono.saturating_add(min);
+        let lo = received_at.saturating_sub(MAX_SAMPLE_AGE_MS);
+        if raw < lo {
+            // Implausible: clamp into the window and mark the time as unknown-precision.
+            return Mapped { observed_at: lo, uncertainty_ms: u32::MAX };
+        }
+        let observed = raw.min(received_at);
         let drift = i64::from(age_ms) * DRIFT_PPM / 1_000_000;
-        let unc = (self.spread_ms() + drift).max(MIN_UNCERTAINTY_MS);
+        let unc = self.spread_ms().saturating_add(drift).max(MIN_UNCERTAINTY_MS);
         Mapped { observed_at: observed, uncertainty_ms: u32::try_from(unc).unwrap_or(u32::MAX) }
     }
 }
@@ -106,6 +115,14 @@ mod tests {
         let m = e.map(100, 50, 10_000);
         assert_eq!(m.uncertainty_ms, u32::MAX);
         assert_eq!(m.observed_at, 9_950);
+    }
+
+    #[test]
+    fn hostile_mono_values_are_clamped() {
+        let mut e = OffsetEstimator::default();
+        e.observe([1; 16], u64::MAX, 1_000_000);
+        let m = e.map(0, u32::MAX, 1_000_000);
+        assert!(m.observed_at >= 1_000_000 - MAX_SAMPLE_AGE_MS && m.observed_at <= 1_000_000);
     }
 
     proptest! {

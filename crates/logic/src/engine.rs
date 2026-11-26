@@ -14,6 +14,11 @@ use ho_domain::*;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+/// Probe ids the firmware runs before it has received any desired configuration.
+pub const BUILTIN_NODE_TARGETS: [&str; 3] = ["gw-icmp", "server-icmp", "server-udp"];
+/// Upper bound on tracked targets per vantage (state cannot grow with hostile input).
+pub const MAX_TARGETS_PER_VANTAGE: usize = 32;
+
 /// Inputs to the engine. Every input carries its own time.
 #[derive(Debug, Clone)]
 pub enum Input {
@@ -141,6 +146,8 @@ pub struct Engine {
     last_tick: Option<UnixMs>,
     last_location_step: Option<UnixMs>,
     ble_discarded: u64,
+    /// Probe results dropped because their target id is not configured.
+    pub unknown_targets: u64,
 }
 
 impl Engine {
@@ -170,6 +177,7 @@ impl Engine {
             last_tick: None,
             last_location_step: None,
             ble_discarded: 0,
+            unknown_targets: 0,
         }
     }
 
@@ -236,15 +244,20 @@ impl Engine {
         fx
     }
 
-    fn target_meta(&self, vantage: &str, target: &str, kind: &str) -> (String, Option<String>, bool) {
+    /// Metadata for a configured target, or `None` if the id is not allowed for this
+    /// vantage (unknown ids are dropped so node input cannot grow server state).
+    fn target_meta(&self, vantage: &str, target: &str, kind: &str) -> Option<(String, Option<String>, bool)> {
         if vantage == CENTRAL {
-            if let Some(c) = self.cfg.central_checks.iter().find(|c| c.id.as_str() == target) {
-                return (kind.to_string(), c.asset.as_ref().map(ToString::to_string), c.critical);
-            }
-        } else if let Some(t) = self.cfg.probe_targets.iter().find(|t| t.id.as_str() == target) {
-            return (kind.to_string(), t.asset.as_ref().map(ToString::to_string), t.critical);
+            let c = self.cfg.central_checks.iter().find(|c| c.id.as_str() == target)?;
+            return Some((kind.to_string(), c.asset.as_ref().map(ToString::to_string), c.critical));
         }
-        (kind.to_string(), None, false)
+        if let Some(t) = self.cfg.probe_targets.iter().find(|t| t.id.as_str() == target) {
+            if !t.nodes.is_empty() && !t.nodes.iter().any(|n| n.as_str() == vantage) {
+                return None;
+            }
+            return Some((kind.to_string(), t.asset.as_ref().map(ToString::to_string), t.critical));
+        }
+        BUILTIN_NODE_TARGETS.contains(&target).then(|| (kind.to_string(), None, false))
     }
 
     fn ap_of(&self, bssid: &str) -> Option<String> {
@@ -271,10 +284,20 @@ impl Engine {
         }
         match o.kind {
             ObsKind::Probe(p) => {
-                let (kind, asset, critical) = self.target_meta(&src, &p.target_id, &p.kind);
+                let Some((kind, asset, critical)) = self.target_meta(&src, &p.target_id, &p.kind) else {
+                    self.unknown_targets += 1;
+                    return;
+                };
+                let key = (src.clone(), p.target_id.clone());
+                if !self.targets.contains_key(&key)
+                    && self.targets.keys().filter(|(v, _)| *v == src).count() >= MAX_TARGETS_PER_VANTAGE
+                {
+                    self.unknown_targets += 1;
+                    return;
+                }
                 let window = self.cfg.thresholds.loss_window_ms;
                 let is_dns = kind == "dns";
-                let e = self.targets.entry((src.clone(), p.target_id.clone())).or_insert_with(|| TargetEntry {
+                let e = self.targets.entry(key).or_insert_with(|| TargetEntry {
                     kind,
                     asset: asset.clone(),
                     critical,
