@@ -2,6 +2,16 @@
 # `%u` pins every node to its own topic subtree. Nodes may never publish desired
 # config or ACKs, and may never read another node's data.
 # Replace "home" if your site id differs.
+#
+# NOTE: mosquitto `pattern` rules apply to *every* authenticated user, including the
+# service accounts below. A service account could therefore publish under
+# nodes/<its-own-username>/... . Two layers prevent that from mattering:
+#   1. `observatory-server` and `homeassistant` are reserved and rejected as node ids
+#      by config validation, and
+#   2. the server only accepts frames from node ids registered in the site config,
+#      whose topic id matches the frame's envelope id.
+# With mosquitto's dynamic-security plugin you can instead bind these patterns to a
+# `nodes` role only.
 
 # ---- nodes (pattern rules apply to every authenticated user)
 pattern write observatory/v1/home/nodes/%u/telemetry

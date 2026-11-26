@@ -1,5 +1,6 @@
 [package]
 name = "ho-server"
+description = "Home Observatory central service"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +10,38 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+ho-protocol = { path = "../protocol", features = ["std"] }
+ho-domain = { path = "../domain" }
+ho-logic = { path = "../logic" }
+ho-storage = { path = "../storage" }
+ho-collectors = { path = "../collectors" }
+ho-integrations = { path = "../integrations" }
+tokio.workspace = true
+tokio-util.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+rumqttc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+futures.workspace = true
+async-stream.workspace = true
+time.workspace = true
+rand.workspace = true
+hex.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+ho-simulator = { path = "../simulator" }
+
+[[bin]]
+name = "observatory-server"
+path = "src/main.rs"

@@ -15,6 +15,7 @@
 //! skipped and records longer than this version expects keep their known prefix,
 //! which is the additive-compatibility rule. Anything else bumps `SCHEMA_VERSION`.
 #![cfg_attr(not(feature = "std"), no_std)]
+#![warn(clippy::indexing_slicing, clippy::cast_possible_truncation)]
 
 mod codec;
 mod records;

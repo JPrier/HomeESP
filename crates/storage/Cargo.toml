@@ -1,5 +1,6 @@
 [package]
 name = "ho-storage"
+description = "SQLite persistence for observations, state, incidents and outbox"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +10,13 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+ho-domain = { path = "../domain" }
+ho-logic = { path = "../logic" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

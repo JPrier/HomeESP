@@ -1,5 +1,6 @@
 [package]
 name = "ho-collectors"
+description = "Central probes (DNS/TCP/HTTP/ICMP/UDP echo) and read-only adapters (OPNsense, SNMP)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +10,18 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+ho-domain = { path = "../domain" }
+ho-logic = { path = "../logic" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+socket2 = { version = "0.5", features = ["all"] }
+
+[dev-dependencies]
+hex.workspace = true

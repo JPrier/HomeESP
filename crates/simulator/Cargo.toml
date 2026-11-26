@@ -1,5 +1,6 @@
 [package]
 name = "ho-simulator"
+description = "Deterministic node/network/location simulator and scenario harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,3 +10,13 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+ho-protocol = { path = "../protocol", features = ["std"] }
+ho-domain = { path = "../domain" }
+ho-logic = { path = "../logic" }
+rand.workspace = true
+rand_chacha.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
