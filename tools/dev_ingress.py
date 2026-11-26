@@ -19,6 +19,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import selectors
+import socket
+import threading
 import time
 
 MAX_TCP_CONNS = 64
@@ -65,47 +68,63 @@ class TcpRelay:
             self.active -= 1
 
 
-class UdpClient(asyncio.DatagramProtocol):
-    def __init__(self, relay: "UdpRelay", addr: tuple) -> None:
-        self.relay, self.addr, self.transport, self.last = relay, addr, None, time.monotonic()
-
-    def connection_made(self, transport) -> None:  # type: ignore[override]
-        self.transport = transport
-
-    def datagram_received(self, data: bytes, _addr) -> None:  # type: ignore[override]
-        # Responses are never larger than requests at the echo server; still cap here.
-        if self.relay.transport and len(data) <= MAX_DATAGRAM:
-            self.relay.transport.sendto(data, self.addr)
+def _no_connreset(sock: socket.socket) -> None:
+    """Windows: stop ICMP port-unreachable from poisoning the UDP socket."""
+    if hasattr(socket, "SIO_UDP_CONNRESET"):
+        try:
+            sock.ioctl(socket.SIO_UDP_CONNRESET, False)  # type: ignore[attr-defined]
+        except OSError:
+            pass
 
 
-class UdpRelay(asyncio.DatagramProtocol):
-    def __init__(self, upstream_port: int) -> None:
-        self.upstream_port = upstream_port
-        self.clients: dict[tuple, UdpClient] = {}
-        self.transport = None
+def udp_relay(bind: str, port: int, upstream: int, stop: threading.Event) -> None:
+    """Single-threaded selector relay with a bounded per-client upstream socket map.
 
-    def connection_made(self, transport) -> None:  # type: ignore[override]
-        self.transport = transport
-
-    def datagram_received(self, data: bytes, addr) -> None:  # type: ignore[override]
-        if len(data) > MAX_DATAGRAM:
-            return
-        asyncio.get_running_loop().create_task(self.forward(data, addr))
-
-    async def forward(self, data: bytes, addr: tuple) -> None:
-        now = time.monotonic()
-        for k in [k for k, c in self.clients.items() if now - c.last > UDP_IDLE_S]:
-            self.clients.pop(k).transport.close()
-        c = self.clients.get(addr)
-        if c is None:
-            if len(self.clients) >= MAX_UDP_CLIENTS:
-                return
-            loop = asyncio.get_running_loop()
-            _, c = await loop.create_datagram_endpoint(lambda: UdpClient(self, addr),
-                                                       remote_addr=("127.0.0.1", self.upstream_port))
-            self.clients[addr] = c
-        c.last = now
-        c.transport.sendto(data)
+    (asyncio datagram transports on the Windows proactor loop silently failed to send
+    replies to LAN clients, so this uses plain non-blocking sockets.)"""
+    sel = selectors.DefaultSelector()
+    front = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    front.bind((bind, port))
+    front.setblocking(False)
+    _no_connreset(front)
+    sel.register(front, selectors.EVENT_READ, None)
+    clients: dict[tuple, tuple[socket.socket, float]] = {}
+    while not stop.is_set():
+        for key, _ in sel.select(timeout=1.0):
+            sock = key.fileobj
+            try:
+                data, addr = sock.recvfrom(MAX_DATAGRAM + 1)  # type: ignore[union-attr]
+            except OSError:
+                continue
+            if len(data) > MAX_DATAGRAM:
+                continue
+            if key.data is None:  # from a LAN client -> upstream
+                now = time.monotonic()
+                for k in [k for k, (_, t) in clients.items() if now - t > UDP_IDLE_S]:
+                    up, _ = clients.pop(k)
+                    sel.unregister(up)
+                    up.close()
+                entry = clients.get(addr)
+                if entry is None:
+                    if len(clients) >= MAX_UDP_CLIENTS:
+                        continue
+                    up = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    up.connect(("127.0.0.1", upstream))
+                    up.setblocking(False)
+                    _no_connreset(up)
+                    sel.register(up, selectors.EVENT_READ, addr)
+                    entry = (up, now)
+                clients[addr] = (entry[0], now)
+                try:
+                    entry[0].send(data)
+                except OSError:
+                    pass
+            else:  # reply from upstream -> the LAN client it belongs to
+                try:
+                    front.sendto(data, key.data)
+                except OSError as e:
+                    log.debug("udp reply failed: %s", e)
+    front.close()
 
 
 async def main() -> None:
@@ -119,8 +138,8 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     tcp = TcpRelay(a.mqtt_upstream)
     server = await asyncio.start_server(tcp.handle, a.bind, a.mqtt_port)
-    loop = asyncio.get_running_loop()
-    await loop.create_datagram_endpoint(lambda: UdpRelay(a.echo_upstream), local_addr=(a.bind, a.echo_port))
+    stop = threading.Event()
+    threading.Thread(target=udp_relay, args=(a.bind, a.echo_port, a.echo_upstream, stop), daemon=True).start()
     log.info("relaying tcp %s:%d->%d udp %d->%d", a.bind, a.mqtt_port, a.mqtt_upstream, a.echo_port, a.echo_upstream)
     async with server:
         await server.serve_forever()

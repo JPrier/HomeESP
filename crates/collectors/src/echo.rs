@@ -7,7 +7,7 @@
 
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Instant;
 
@@ -73,9 +73,55 @@ struct Bucket {
 }
 
 /// Stateful verifier: keys, replay window and per-node token buckets.
+/// Anti-replay state per node: sliding window over `seq` (IPsec/DTLS style).
+#[derive(Default)]
+struct Window {
+    high: u32,
+    /// bit i set => seq (high - i) already accepted
+    bits: u64,
+    last_accept: Option<Instant>,
+    started: bool,
+}
+
+/// Window width in sequence numbers.
+pub const REPLAY_WINDOW: u32 = 64;
+/// Silence after which a sequence restart is accepted as a node reboot.
+pub const REBOOT_QUIET: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl Window {
+    /// Would `seq` be fresh? (Does not mutate.)
+    fn fresh(&self, seq: u32, now: Instant) -> bool {
+        if !self.started || seq > self.high {
+            return true;
+        }
+        let back = self.high - seq;
+        if back >= REPLAY_WINDOW {
+            // Far below the window: only a rebooted node (sequence restarted) after a
+            // quiet period is accepted; a replay of old traffic is not.
+            return self.last_accept.is_some_and(|t| now.saturating_duration_since(t) >= REBOOT_QUIET);
+        }
+        self.bits & (1u64 << back) == 0
+    }
+    fn accept(&mut self, seq: u32, now: Instant) {
+        if !self.started || (seq < self.high && self.high - seq >= REPLAY_WINDOW) {
+            *self = Window { high: seq, bits: 1, last_accept: Some(now), started: true };
+            return;
+        }
+        if seq > self.high {
+            let shift = seq - self.high;
+            self.bits = if shift >= 64 { 0 } else { self.bits << shift };
+            self.bits |= 1;
+            self.high = seq;
+        } else {
+            self.bits |= 1u64 << (self.high - seq);
+        }
+        self.last_accept = Some(now);
+    }
+}
+
 pub struct EchoResponder {
     keys: HashMap<String, Vec<u8>>,
-    recent: HashMap<String, VecDeque<(u32, u32)>>,
+    windows: HashMap<String, Window>,
     buckets: HashMap<String, Bucket>,
     rate_per_s: f64,
     burst: f64,
@@ -85,7 +131,7 @@ pub struct EchoResponder {
 
 impl EchoResponder {
     pub fn new(keys: HashMap<String, Vec<u8>>, rate_per_s: f64, burst: f64) -> Self {
-        Self { keys, recent: HashMap::new(), buckets: HashMap::new(), rate_per_s, burst, served: 0, rejected: HashMap::new() }
+        Self { keys, windows: HashMap::new(), buckets: HashMap::new(), rate_per_s, burst, served: 0, rejected: HashMap::new() }
     }
 
     /// Validate a request and produce the response bytes (same length) or a rejection.
@@ -124,7 +170,12 @@ impl EchoResponder {
         };
         let (seq, nonce, mono) = (rd(4 + n)?, rd(8 + n)?, rd(12 + n)?);
         let node = node.to_string();
-        // Rate limit per authenticated node.
+        // 1. Replay check first (authenticated but stale/duplicate requests cost nothing).
+        let w = self.windows.entry(node.clone()).or_default();
+        if !w.fresh(seq, now) {
+            return Err(Reject::Replay);
+        }
+        // 2. Rate limit per authenticated node; only fresh requests consume tokens.
         let b = self.buckets.entry(node.clone()).or_insert(Bucket { tokens: self.burst, last: now });
         let dt = now.saturating_duration_since(b.last).as_secs_f64();
         b.tokens = (b.tokens + dt * self.rate_per_s).min(self.burst);
@@ -133,15 +184,9 @@ impl EchoResponder {
             return Err(Reject::RateLimited);
         }
         b.tokens -= 1.0;
-        // Replay window (bounded per node).
-        let seen = self.recent.entry(node.clone()).or_default();
-        if seen.contains(&(seq, nonce)) {
-            return Err(Reject::Replay);
-        }
-        if seen.len() >= 64 {
-            seen.pop_front();
-        }
-        seen.push_back((seq, nonce));
+        // 3. Commit to the replay window only after MAC + freshness + budget passed.
+        w.accept(seq, now);
+        let _ = nonce;
         let key = self.keys.get(&node).ok_or(Reject::UnknownNode)?;
         build(true, &node, seq, nonce, mono, key).ok_or(Reject::Format)
     }
@@ -208,6 +253,40 @@ mod tests {
         assert_eq!(r.handle(&[0u8; 400], now), Err(Reject::Size));
         let wrong_key = build(false, "node-01", 3, 3, 0, b"another-key").unwrap();
         assert_eq!(r.handle(&wrong_key, now), Err(Reject::BadMac));
+    }
+
+    #[test]
+    fn sliding_window_rejects_old_replays_and_accepts_reboots() {
+        let mut r = EchoResponder::new([("n".to_string(), KEY.to_vec())].into(), 1000.0, 1000.0);
+        let t0 = Instant::now();
+        let first = build(false, "n", 1, 1, 0, KEY).unwrap();
+        assert!(r.handle(&first, t0).is_ok());
+        for s in 2..200u32 {
+            assert!(r.handle(&build(false, "n", s, s, 0, KEY).unwrap(), t0).is_ok());
+        }
+        // Old request pushed far out of the window: still a replay while the node is active.
+        assert_eq!(r.handle(&first, t0), Err(Reject::Replay));
+        // Out-of-order but within the window and unseen: accepted once.
+        let mut r2 = EchoResponder::new([("n".to_string(), KEY.to_vec())].into(), 1000.0, 1000.0);
+        assert!(r2.handle(&build(false, "n", 10, 1, 0, KEY).unwrap(), t0).is_ok());
+        let ooo = build(false, "n", 8, 2, 0, KEY).unwrap();
+        assert!(r2.handle(&ooo, t0).is_ok());
+        assert_eq!(r2.handle(&ooo, t0), Err(Reject::Replay));
+        // After a quiet period, a restarted sequence (reboot) is accepted.
+        let later = t0 + REBOOT_QUIET + std::time::Duration::from_secs(1);
+        assert!(r.handle(&build(false, "n", 1, 77, 0, KEY).unwrap(), later).is_ok());
+    }
+
+    #[test]
+    fn replays_do_not_consume_rate_budget() {
+        let mut r = EchoResponder::new([("n".to_string(), KEY.to_vec())].into(), 0.001, 2.0);
+        let now = Instant::now();
+        let a = build(false, "n", 1, 1, 0, KEY).unwrap();
+        assert!(r.handle(&a, now).is_ok());
+        for _ in 0..10 {
+            assert_eq!(r.handle(&a, now), Err(Reject::Replay));
+        }
+        assert!(r.handle(&build(false, "n", 2, 2, 0, KEY).unwrap(), now).is_ok(), "budget intact");
     }
 
     #[test]

@@ -1,0 +1,77 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Home Observatory API",
+    "version": "1.0.0",
+    "description": "Local-first home network observability and spatial intelligence. All routes except /health/* require `Authorization: Bearer <token>` (viewer for reads, operator for writes). Timestamps in responses are UTC (ISO-8601 or Unix milliseconds where named *_ms / at). RTTs are milliseconds in API responses; nullable values mean 'unknown', never zero."
+  },
+  "components": {
+    "securitySchemes": { "bearer": { "type": "http", "scheme": "bearer" } },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "required": ["code", "message", "request_id"],
+        "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "request_id": { "type": "string" } }
+      },
+      "SeriesPoint": {
+        "type": "object",
+        "properties": {
+          "t": { "type": "integer", "description": "bucket start, Unix ms" },
+          "samples": { "type": "integer" },
+          "eligible": { "type": "integer", "description": "loss denominator" },
+          "loss_pct": { "type": "number", "nullable": true },
+          "p50_ms": { "type": "number", "nullable": true },
+          "p95_ms": { "type": "number", "nullable": true },
+          "max_ms": { "type": "number", "nullable": true },
+          "dns_bad": { "type": "integer" }
+        }
+      }
+    }
+  },
+  "security": [{ "bearer": [] }],
+  "paths": {
+    "/health/live": { "get": { "security": [], "summary": "Process liveness", "responses": { "200": { "description": "ok" } } } },
+    "/health/ready": { "get": { "security": [], "summary": "Dependency readiness (broker, writer, database)", "responses": { "200": { "description": "ready" }, "503": { "description": "not ready" } } } },
+    "/metrics": { "get": { "summary": "Prometheus exposition (viewer)", "responses": { "200": { "description": "text/plain" } } } },
+    "/api/v1/site/status": { "get": { "summary": "Site health, coverage, ingest lag, active incidents, score", "responses": { "200": { "description": "status" }, "401": { "description": "unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } } } } },
+    "/api/v1/nodes": { "get": { "summary": "Nodes with liveness, capabilities, config state", "responses": { "200": { "description": "nodes" } } } },
+    "/api/v1/nodes/{id}": { "get": { "summary": "Node detail: health, lifecycle events, latest scan", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "node" }, "404": { "description": "not found" } } } },
+    "/api/v1/nodes/{id}/config": {
+      "get": { "summary": "Desired and reported configuration revision", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "config" } } },
+      "put": { "summary": "Re-publish desired config (operator, If-Match revision)", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }, { "name": "If-Match", "in": "header", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "published" }, "412": { "description": "revision mismatch" } } }
+    },
+    "/api/v1/assets": { "get": { "summary": "Configured assets and radios", "responses": { "200": { "description": "assets" } } } },
+    "/api/v1/topology": { "get": { "summary": "Typed graph with health, incident scope, configured vs observed edges", "responses": { "200": { "description": "graph" } } } },
+    "/api/v1/rooms": { "get": { "summary": "Floors, room polygons, adjacency, node placement", "responses": { "200": { "description": "rooms" } } } },
+    "/api/v1/floorplans": { "get": { "summary": "Alias of /rooms", "responses": { "200": { "description": "rooms" } } } },
+    "/api/v1/devices": { "get": { "summary": "Enrolled devices (matcher material never returned)", "responses": { "200": { "description": "devices" } } } },
+    "/api/v1/devices/{id}": {
+      "get": { "summary": "Device detail", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "device" } } },
+      "delete": { "summary": "Revoke consent: stop tracking, purge data, expire HA entities (operator)", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "revoked" } } }
+    },
+    "/api/v1/locations/current": { "get": { "summary": "Current confidence-aware location states", "responses": { "200": { "description": "locations" } } } },
+    "/api/v1/locations/history": { "get": { "summary": "Location transitions (operator)", "parameters": [{ "name": "device", "in": "query", "schema": { "type": "string" } }, { "name": "hours", "in": "query", "schema": { "type": "integer", "maximum": 2160 } }], "responses": { "200": { "description": "history" } } } },
+    "/api/v1/metrics/query": { "get": { "summary": "Bounded probe series (allowlisted targets, <= 2000 points)", "parameters": [{ "name": "target", "in": "query", "required": true, "schema": { "type": "string" } }, { "name": "vantage", "in": "query", "schema": { "type": "string" } }, { "name": "hours", "in": "query", "schema": { "type": "integer" } }, { "name": "from", "in": "query", "schema": { "type": "integer" } }, { "name": "to", "in": "query", "schema": { "type": "integer" } }, { "name": "max_points", "in": "query", "schema": { "type": "integer", "maximum": 2000 } }], "responses": { "200": { "description": "series of SeriesPoint" }, "400": { "description": "bad request" } } } },
+    "/api/v1/metrics/catalog": { "get": { "summary": "Available (target, vantage) series", "responses": { "200": { "description": "catalog" } } } },
+    "/api/v1/coverage": { "get": { "summary": "Measured RSSI anchors per node/BSSID (2.4 GHz)", "responses": { "200": { "description": "anchors" } } } },
+    "/api/v1/incidents": { "get": { "summary": "Incidents", "parameters": [{ "name": "status", "in": "query", "schema": { "type": "string", "enum": ["open", "recovering", "resolved"] } }], "responses": { "200": { "description": "incidents" } } } },
+    "/api/v1/incidents/{id}": { "get": { "summary": "Incident with hypothesis, evidence and timeline", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "incident" } } } },
+    "/api/v1/incidents/{id}/ack": { "post": { "summary": "Acknowledge (operator)", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "acknowledged" } } } },
+    "/api/v1/incidents/{id}/notes": { "post": { "summary": "Add operator note", "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }], "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "note": { "type": "string", "maxLength": 2000 } } } } } }, "responses": { "200": { "description": "noted" } } } },
+    "/api/v1/recommendations": { "get": { "summary": "Advisory, evidence-based recommendations", "responses": { "200": { "description": "recommendations" } } } },
+    "/api/v1/diagnostics/dns": { "get": { "summary": "DNS matrix by vantage/resolver", "responses": { "200": { "description": "matrix" } } } },
+    "/api/v1/diagnostics/jobs": {
+      "get": { "summary": "Allowlisted diagnostic jobs", "responses": { "200": { "description": "jobs" } } },
+      "post": { "summary": "Run an allowlisted bounded job (operator)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "job": { "type": "string", "enum": ["check-now", "dns-matrix-now"] }, "check": { "type": "string" } } } } } }, "responses": { "200": { "description": "results" } } }
+    },
+    "/api/v1/notifications/test": { "post": { "summary": "Queue a labeled test notification (operator)", "responses": { "200": { "description": "queued" } } } },
+    "/api/v1/outbox": { "get": { "summary": "Notification outbox and delivery state", "responses": { "200": { "description": "outbox" } } } },
+    "/api/v1/admin/config": {
+      "get": { "summary": "Current config + revision (operator)", "responses": { "200": { "description": "config" } } },
+      "put": { "summary": "Validate (dry_run) or apply config with If-Match revision (operator)", "responses": { "200": { "description": "applied / valid" }, "412": { "description": "revision mismatch" }, "422": { "description": "validation issues" } } }
+    },
+    "/api/v1/audit": { "get": { "summary": "Audit trail (operator)", "responses": { "200": { "description": "audit" } } } },
+    "/api/v1/events/stream": { "get": { "summary": "Server-sent events of sanitized state changes", "responses": { "200": { "description": "text/event-stream" } } } },
+    "/api/v1/openapi.json": { "get": { "summary": "This document", "responses": { "200": { "description": "OpenAPI" } } } }
+  }
+}

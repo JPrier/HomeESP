@@ -297,13 +297,13 @@ void publish_retained_state() {
                       (uint16_t)kMaxFrame, (uint8_t)node::kMaxTargets, (uint8_t)node::kMaxBssids, 0};
     w.push(c);
     size_t n = w.finish();
-    if (publish_raw("capabilities", g_scratch, n, true, 1)) g_need_caps = false;
+    if (publish_raw("capabilities", g_scratch, n, true, 0)) g_need_caps = false;
     FrameWriter s(g_scratch, sizeof g_scratch, kMaxFrame);
     Header hs = make_header(MsgKind::Status, 0);
     s.begin(hs);
     s.push(NodeStatusRec{true, 0, (uint32_t)(mono_ms() / 1000)});
     size_t m = s.finish();
-    publish_raw("status", g_scratch, m, true, 1);
+    publish_raw("status", g_scratch, m, true, 0);
   }
   if (g_need_cfg_report) {
     FrameWriter w(g_scratch, sizeof g_scratch, kMaxFrame);
@@ -311,7 +311,7 @@ void publish_retained_state() {
     w.begin(h);
     w.push(g_cfg_status);
     size_t n = w.finish();
-    if (publish_raw("config/reported", g_scratch, n, true, 1)) g_need_cfg_report = false;
+    if (publish_raw("config/reported", g_scratch, n, true, 0)) g_need_cfg_report = false;
   }
 }
 
@@ -325,7 +325,7 @@ void drain() {
   if (e && now - g_last_event_send >= kEventResendMs) {
     if (g_bucket.try_take(e->len, now)) {
       uint16_t n = g_eq.copy_front(g_scratch, sizeof g_scratch);
-      publish_raw("events", g_scratch, n, false, 1);
+      publish_raw("events", g_scratch, n, false, 0);  // durability = application ACK + retry
       g_last_event_send = now;
       if (++g_event_tries > 120) { g_eq.pop(); g_event_tries = 0; }  // bounded retries
     }
@@ -656,6 +656,9 @@ void sample_link(uint32_t now) {
 void wifi_begin() {
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
+  // USB-powered nodes: disable modem sleep so DTIM power-save does not inflate RTTs
+  // (a monitoring artifact, not a network property).
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
   WiFi.setAutoReconnect(true);  // SDK reconnect; our backoff only governs MQTT
   WiFi.hostname(g_sec.node_id);
   g_h_conn = WiFi.onStationModeConnected([](const WiFiEventStationModeConnected& e) {
@@ -695,8 +698,10 @@ void mqtt_tick(uint32_t now) {
     g_mqtt_backoff.reset();
     g_reconnects++;
     was_connected = true;
-    g_mqtt.subscribe(topic("config/desired"), 1);
+    // Subscribe to `ack` first: the retained desired config is delivered right after
+    // its SUBACK, and lwmqtt aborts a blocking SUBSCRIBE that sees another packet.
     g_mqtt.subscribe(topic("ack"), 1);
+    g_mqtt.subscribe(topic("config/desired"), 1);
     g_need_caps = g_need_cfg_report = true;
     push_life(Lifecycle::MqttConnected, 0, nullptr, nullptr, false, 0);
     logf("mqtt connected");
