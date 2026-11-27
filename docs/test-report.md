@@ -13,7 +13,7 @@ engine — not field-verified.
 | Dashboard (Vitest + Testing Library) | 12 tests | PASS |
 | Python tools (pytest) | 4 tests | PASS |
 | Scenario sweep S01–S17 | 17 scenarios × 30 seeds = 510 runs | PASS (0 failures) |
-| Real-broker E2E (`tests/e2e/broker_e2e.sh`) | 1 scripted run | PASS in CI after fixture fix (see CI) |
+| Real-broker E2E (`tests/e2e/broker_e2e.sh`) | 1 scripted run | PASS (CI run on commit 6e67129: all 8 jobs green) |
 | Static gates | rustfmt, clippy `-D warnings`, ESLint strict, `tsc` strict, ruff, architecture rules, cargo-deny | PASS |
 
 Property/fuzz-style coverage: Rust decoder totality (2,000 random inputs + mutation of
@@ -81,7 +81,7 @@ redelivery invariants, time mapping never in the future, loss always in [0, 100]
 
 | ID | Requirement | Status | Evidence / notes |
 |---|---|---|---|
-| A01 | Fresh checkout runs safe simulation + UI without credentials | PASS | `observatory-server --simulate` (smoke-tested), Compose `simulation` profile, CI image smoke |
+| A01 | Fresh checkout runs safe simulation + UI without credentials | PASS | `observatory-server --simulate` smoke-tested locally (6 synthetic nodes, UI served); CI image smoke PASS. `deploy/compose.sim.yaml` itself: NOT RUN |
 | A02 | Firmware builds; bounded scheduling/buffers | PASS | CI firmware build + size gate; host tests of scheduler/token bucket/queue; hardware running |
 | A03 | Authenticated, versioned, deduplicated ingestion; durable ACK | PASS | `api.rs`, `broker_e2e.sh`, storage tests, hardware ACKs |
 | A04 | Distributed gateway/server/DNS/UDP probes + wired baseline | PASS | live production data |
