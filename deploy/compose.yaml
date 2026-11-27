@@ -39,6 +39,8 @@ services:
     network_mode: host
     restart: unless-stopped
     depends_on: [broker]
+    # Use a UID that is unused on the host (the image default is 10001).
+    user: "${OBS_UID:-10001}:${OBS_UID:-10001}"
     read_only: true
     cap_drop: [ALL]               # ICMP uses unprivileged ping sockets (net.ipv4.ping_group_range)
     security_opt: ["no-new-privileges:true"]
