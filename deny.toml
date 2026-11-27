@@ -5,6 +5,16 @@ all-features = false
 [advisories]
 version = 2
 yanked = "deny"
+# rumqttc 0.25.1 depends on rustls-webpki 0.102 solely for an error type
+# (src/tls.rs `WebPki(#[from] webpki::Error)`); certificate verification runs in
+# rustls 0.23 / rustls-webpki 0.103 (patched). The 0.102 code paths named in these
+# advisories (CRL / name-constraint handling) are not reachable from this service.
+# Re-evaluate when rumqttc moves to 0.103.
+ignore = [
+  { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.102 not used for verification (rumqttc error type only)" },
+  { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.102 not used for verification (rumqttc error type only)" },
+  { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.102 not used for verification (rumqttc error type only)" },
+]
 
 [licenses]
 version = 2

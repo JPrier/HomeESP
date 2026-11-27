@@ -18,6 +18,7 @@ edition = "2021"
 rust-version = "1.91"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/JPrier/HomeESP"
+publish = false
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -46,7 +47,8 @@ tokio-util = "0.7"
 axum = { version = "0.8", features = ["macros"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "trace", "limit", "cors"] }
-rumqttc = "0.24"
+rumqttc = { version = "0.25", default-features = false, features = ["use-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

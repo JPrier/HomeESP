@@ -48,6 +48,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      # The action's container has its own toolchain; the pin is for builds only.
+      - run: rm rust-toolchain.toml
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories bans licenses sources
@@ -74,10 +76,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install platformio==6.1.18
-      - run: pio run -d firmware
-      - name: size report and budget gate (RAM < 70%, flash < 60%)
+      - name: build + size budget gate (RAM < 70%, flash < 60%)
         run: |
-          pio run -d firmware -t size | tee size.txt
+          pio run -d firmware | tee size.txt
           python tools/size_gate.py size.txt 70 60
       - uses: actions/upload-artifact@v4
         with:

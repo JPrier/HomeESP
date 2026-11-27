@@ -70,6 +70,8 @@ fn is_loopback(bind: &str) -> bool {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    // One process-wide TLS crypto provider (ring), shared by MQTT and HTTPS clients.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let filter =
         tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
     if args.log_json {
