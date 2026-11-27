@@ -144,26 +144,48 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
         });
     }
 
-    let fresh_roams: Vec<&RoamView> = s.roams.iter().filter(|r| s.now - r.at <= window * 5).collect();
+    let fresh_roams: Vec<&RoamView> = s
+        .roams
+        .iter()
+        .filter(|r| s.now - r.at <= window * 5)
+        .collect();
     let central = |asset: &str| -> Vec<&TargetView> {
-        s.targets.iter().filter(|t| is_wired(t) && t.asset.as_deref() == Some(asset)).collect()
+        s.targets
+            .iter()
+            .filter(|t| is_wired(t) && t.asset.as_deref() == Some(asset))
+            .collect()
     };
 
     // R1/R2: AP-level grouping.
     if s.ingestion_ok {
-        let aps: Vec<&str> =
-            cfg.assets.iter().filter(|a| a.kind == AssetKind::AccessPoint).map(|a| a.id.as_str()).collect();
+        let aps: Vec<&str> = cfg
+            .assets
+            .iter()
+            .filter(|a| a.kind == AssetKind::AccessPoint)
+            .map(|a| a.id.as_str())
+            .collect();
         for ap in aps {
-            let missing: Vec<&NodeView> =
-                s.nodes.iter().filter(|n| n.liveness == NodeLiveness::Missing && n.ap.as_deref() == Some(ap)).collect();
-            let roamed: Vec<&RoamView> = fresh_roams.iter().copied().filter(|r| r.from_ap == ap).collect();
-            let affected: BTreeSet<String> =
-                missing.iter().map(|n| n.id.clone()).chain(roamed.iter().map(|r| r.node.clone())).collect();
+            let missing: Vec<&NodeView> = s
+                .nodes
+                .iter()
+                .filter(|n| n.liveness == NodeLiveness::Missing && n.ap.as_deref() == Some(ap))
+                .collect();
+            let roamed: Vec<&RoamView> = fresh_roams
+                .iter()
+                .copied()
+                .filter(|r| r.from_ap == ap)
+                .collect();
+            let affected: BTreeSet<String> = missing
+                .iter()
+                .map(|n| n.id.clone())
+                .chain(roamed.iter().map(|r| r.node.clone()))
+                .collect();
             let mgmt = central(ap);
             let mgmt_failed = mgmt.iter().any(|t| t.health == Health::Failed);
             let mgmt_healthy = !mgmt.is_empty() && mgmt.iter().all(|t| t.health == Health::Healthy);
             let radio = s.radios.iter().find(|r| r.ap == ap);
-            let radio_absent = radio.is_some_and(|r| r.absent_for.len() >= 2 && r.seen_by.is_empty());
+            let radio_absent =
+                radio.is_some_and(|r| r.absent_for.len() >= 2 && r.seen_by.is_empty());
             // Roams are only supporting evidence; a hypothesis needs a *current*
             // symptom (a node still missing, failing management, or an absent radio),
             // otherwise it could never resolve while old roams remain in the window.
@@ -177,7 +199,10 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
                     evidence.push(format!(
                         "node {} roamed away from {ap}{}",
                         r.node,
-                        r.to_ap.as_ref().map(|t| format!(" to {t}")).unwrap_or_default()
+                        r.to_ap
+                            .as_ref()
+                            .map(|t| format!(" to {t}"))
+                            .unwrap_or_default()
                     ));
                 }
                 if let Some(r) = radio {
@@ -202,14 +227,26 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
                     )
                 } else {
                     for t in &mgmt {
-                        evidence.push(format!("management check {} {}: {}", t.target_id, t.health.as_str(), t.reason));
+                        evidence.push(format!(
+                            "management check {} {}: {}",
+                            t.target_id,
+                            t.health.as_str(),
+                            t.reason
+                        ));
                     }
-                    let conf = if mgmt_failed { Confidence::High } else { Confidence::Medium };
+                    let conf = if mgmt_failed {
+                        Confidence::High
+                    } else {
+                        Confidence::Medium
+                    };
                     (
                         HypKind::ApUnavailable,
                         format!("{ap} or its uplink/power is unavailable"),
                         conf,
-                        vec!["switch port / PoE failure".into(), "AP reboot or firmware fault".into()],
+                        vec![
+                            "switch port / PoE failure".into(),
+                            "AP reboot or firmware fault".into(),
+                        ],
                         "check the AP's switch port, PoE budget and uplink".into(),
                     )
                 };
@@ -235,8 +272,16 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
         }
 
         // R3: individual missing nodes not explained above (S04).
-        for n in s.nodes.iter().filter(|n| n.liveness == NodeLiveness::Missing && !absorbed_nodes.contains(&n.id)) {
-            let peers_ok = s.nodes.iter().filter(|o| o.id != n.id && o.liveness == NodeLiveness::Online).count();
+        for n in s
+            .nodes
+            .iter()
+            .filter(|n| n.liveness == NodeLiveness::Missing && !absorbed_nodes.contains(&n.id))
+        {
+            let peers_ok = s
+                .nodes
+                .iter()
+                .filter(|o| o.id != n.id && o.liveness == NodeLiveness::Online)
+                .count();
             out.push(Hypothesis {
                 key: format!("node:{}", n.id),
                 kind: HypKind::NodeMissing,
@@ -257,20 +302,32 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
     // Targets observed from vantages that are still trustworthy.
     let live_vantage = |v: &str| -> bool {
         v == CENTRAL
-            || (s.ingestion_ok && !absorbed_nodes.contains(v) && s.nodes.iter().any(|n| n.id == v && n.liveness != NodeLiveness::Missing))
+            || (s.ingestion_ok
+                && !absorbed_nodes.contains(v)
+                && s.nodes
+                    .iter()
+                    .any(|n| n.id == v && n.liveness != NodeLiveness::Missing))
     };
-    let tv: Vec<&TargetView> = s.targets.iter().filter(|t| live_vantage(&t.vantage)).collect();
+    let tv: Vec<&TargetView> = s
+        .targets
+        .iter()
+        .filter(|t| live_vantage(&t.vantage))
+        .collect();
     let bad = |t: &&TargetView| t.health.is_bad();
 
     // R4: WAN outage: gateway reachable, >= 2 independent external checks failing (S08).
     let wan_bad: Vec<&TargetView> = tv
         .iter()
         .copied()
-        .filter(|t| asset_kind(cfg, t.asset.as_deref()) == Some(AssetKind::Wan) && t.health == Health::Failed)
+        .filter(|t| {
+            asset_kind(cfg, t.asset.as_deref()) == Some(AssetKind::Wan)
+                && t.health == Health::Failed
+        })
         .collect();
-    let gw_ok = tv
-        .iter()
-        .any(|t| asset_kind(cfg, t.asset.as_deref()) == Some(AssetKind::Router) && t.health == Health::Healthy);
+    let gw_ok = tv.iter().any(|t| {
+        asset_kind(cfg, t.asset.as_deref()) == Some(AssetKind::Router)
+            && t.health == Health::Healthy
+    });
     let distinct_wan: BTreeSet<&str> = wan_bad.iter().map(|t| t.target_id.as_str()).collect();
     if distinct_wan.len() >= 2 && gw_ok {
         out.push(Hypothesis {
@@ -280,9 +337,17 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
             title: "WAN / upstream connectivity outage".into(),
             cause: "local gateway reachable but multiple independent external checks fail".into(),
             confidence: Confidence::High,
-            scope_assets: wan_bad.iter().filter_map(|t| t.asset.clone()).collect::<BTreeSet<_>>().into_iter().collect(),
+            scope_assets: wan_bad
+                .iter()
+                .filter_map(|t| t.asset.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
             affected_nodes: vec![],
-            evidence: wan_bad.iter().map(|t| format!("{} from {}: {}", t.target_id, t.vantage, t.reason)).collect(),
+            evidence: wan_bad
+                .iter()
+                .map(|t| format!("{} from {}: {}", t.target_id, t.vantage, t.reason))
+                .collect(),
             contradicting: vec!["local gateway checks healthy".into()],
             alternatives: vec!["upstream DNS failure".into(), "ISP routing issue".into()],
             next_check: "check OPNsense WAN gateway status (dpinger) and ISP modem".into(),
@@ -295,7 +360,8 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
                 kind: HypKind::ServiceFailure,
                 severity: Severity::Warning,
                 title: format!("External check {} failing", t.target_id),
-                cause: "single external endpoint failure; not enough evidence for a WAN outage".into(),
+                cause: "single external endpoint failure; not enough evidence for a WAN outage"
+                    .into(),
                 confidence: Confidence::Low,
                 scope_assets: t.asset.iter().cloned().collect(),
                 affected_nodes: vec![],
@@ -312,50 +378,88 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
     let dns: Vec<&TargetView> = tv.iter().copied().filter(|t| t.kind == "dns").collect();
     let dns_bad: Vec<&TargetView> = dns.iter().copied().filter(bad).collect();
     let ip_ok = |vantage: &str| {
-        tv.iter().any(|t| t.vantage == vantage && (t.kind == "icmp" || t.kind == "udp_echo") && t.health == Health::Healthy)
+        tv.iter().any(|t| {
+            t.vantage == vantage
+                && (t.kind == "icmp" || t.kind == "udp_echo")
+                && t.health == Health::Healthy
+        })
     };
     if !dns_bad.is_empty() && !wan_claimed {
         let wired_dns_bad = dns_bad.iter().any(|t| is_wired(t));
-        let wired_dns_ok = dns.iter().any(|t| is_wired(t) && t.health == Health::Healthy);
+        let wired_dns_ok = dns
+            .iter()
+            .any(|t| is_wired(t) && t.health == Health::Healthy);
         let vantages: BTreeSet<&str> = dns_bad.iter().map(|t| t.vantage.as_str()).collect();
         let ip_fine = vantages.iter().all(|v| ip_ok(v));
-        let evidence: Vec<String> =
-            dns_bad.iter().map(|t| format!("{} from {}: {}", t.target_id, t.vantage, t.reason)).collect();
+        let evidence: Vec<String> = dns_bad
+            .iter()
+            .map(|t| format!("{} from {}: {}", t.target_id, t.vantage, t.reason))
+            .collect();
         if wired_dns_bad || (vantages.len() >= 2 && !wired_dns_ok) {
             out.push(Hypothesis {
                 key: "dns:resolver".into(),
                 kind: HypKind::DnsResolver,
-                severity: if dns_bad.iter().any(|t| t.critical) { Severity::Critical } else { Severity::Warning },
+                severity: if dns_bad.iter().any(|t| t.critical) {
+                    Severity::Critical
+                } else {
+                    Severity::Warning
+                },
                 title: "DNS resolution failing".into(),
                 cause: if ip_fine {
                     "resolver or upstream DNS failure; IP reachability is healthy".into()
                 } else {
                     "DNS failing; IP reachability also impaired from some vantages".into()
                 },
-                confidence: if ip_fine { Confidence::High } else { Confidence::Medium },
-                scope_assets: dns_bad.iter().filter_map(|t| t.asset.clone()).collect::<BTreeSet<_>>().into_iter().collect(),
+                confidence: if ip_fine {
+                    Confidence::High
+                } else {
+                    Confidence::Medium
+                },
+                scope_assets: dns_bad
+                    .iter()
+                    .filter_map(|t| t.asset.clone())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect(),
                 affected_nodes: vec![],
                 evidence,
-                contradicting: if ip_fine { vec!["ICMP/UDP probes to the same vantages succeed".into()] } else { vec![] },
-                alternatives: vec!["upstream forwarder outage".into(), "local zone misconfiguration".into()],
-                next_check: "compare local-record vs uncached profiles; inspect Unbound status".into(),
+                contradicting: if ip_fine {
+                    vec!["ICMP/UDP probes to the same vantages succeed".into()]
+                } else {
+                    vec![]
+                },
+                alternatives: vec![
+                    "upstream forwarder outage".into(),
+                    "local zone misconfiguration".into(),
+                ],
+                next_check: "compare local-record vs uncached profiles; inspect Unbound status"
+                    .into(),
             });
-        } else if wired_dns_ok && (vantages.len() >= 2 || dns_bad.iter().any(|t| t.health == Health::Failed)) {
+        } else if wired_dns_ok
+            && (vantages.len() >= 2 || dns_bad.iter().any(|t| t.health == Health::Failed))
+        {
             out.push(Hypothesis {
                 key: "dns:client-path".into(),
                 kind: HypKind::DnsClientPath,
                 severity: Severity::Warning,
                 title: "DNS failing from wireless clients only".into(),
-                cause: "client path / RF / QoS issue between wireless vantages and the resolver".into(),
+                cause: "client path / RF / QoS issue between wireless vantages and the resolver"
+                    .into(),
                 confidence: Confidence::Medium,
                 scope_assets: vec![],
                 affected_nodes: vantages.iter().map(|v| v.to_string()).collect(),
                 evidence,
                 contradicting: vec!["wired DNS check of the same resolver is healthy".into()],
-                alternatives: vec!["UDP loss on Wi-Fi".into(), "resolver rate limiting of wireless clients".into()],
-                next_check: "compare gateway RTT/loss on the same vantages and UDP vs TCP DNS".into(),
+                alternatives: vec![
+                    "UDP loss on Wi-Fi".into(),
+                    "resolver rate limiting of wireless clients".into(),
+                ],
+                next_check: "compare gateway RTT/loss on the same vantages and UDP vs TCP DNS"
+                    .into(),
             });
-        } else if !wired_dns_ok && (vantages.len() >= 2 || dns_bad.iter().any(|t| t.health == Health::Failed)) {
+        } else if !wired_dns_ok
+            && (vantages.len() >= 2 || dns_bad.iter().any(|t| t.health == Health::Failed))
+        {
             out.push(Hypothesis {
                 key: "dns:unknown".into(),
                 kind: HypKind::UnknownDegradation,
@@ -377,7 +481,11 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
     let ip_bad_wireless: Vec<&TargetView> = tv
         .iter()
         .copied()
-        .filter(|t| !is_wired(t) && (t.kind == "icmp" || t.kind == "udp_echo") && t.health == Health::Degraded)
+        .filter(|t| {
+            !is_wired(t)
+                && (t.kind == "icmp" || t.kind == "udp_echo")
+                && t.health == Health::Degraded
+        })
         .collect();
     // Corroboration: >= 2 vantages, or >= 2 degraded targets at one vantage. A single
     // marginal target at one node (likely chance at fleet scale) stays visible as
@@ -385,14 +493,23 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
     let bad_vantages: BTreeSet<&str> = ip_bad_wireless.iter().map(|t| t.vantage.as_str()).collect();
     let corroborated = bad_vantages.len() >= 2 || ip_bad_wireless.len() >= 2;
     if corroborated {
-        let wired: Vec<&TargetView> =
-            tv.iter().copied().filter(|t| is_wired(t) && (t.kind == "icmp" || t.kind == "tcp")).collect();
+        let wired: Vec<&TargetView> = tv
+            .iter()
+            .copied()
+            .filter(|t| is_wired(t) && (t.kind == "icmp" || t.kind == "tcp"))
+            .collect();
         let wired_bad = wired.iter().any(|t| t.health.is_bad());
         let wired_ok = !wired.is_empty() && wired.iter().all(|t| t.health == Health::Healthy);
-        let evidence: Vec<String> =
-            ip_bad_wireless.iter().map(|t| format!("{} from {}: {}", t.target_id, t.vantage, t.reason)).collect();
-        let vantages: Vec<String> =
-            ip_bad_wireless.iter().map(|t| t.vantage.clone()).collect::<BTreeSet<_>>().into_iter().collect();
+        let evidence: Vec<String> = ip_bad_wireless
+            .iter()
+            .map(|t| format!("{} from {}: {}", t.target_id, t.vantage, t.reason))
+            .collect();
+        let vantages: Vec<String> = ip_bad_wireless
+            .iter()
+            .map(|t| t.vantage.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
         let (key, kind, title, cause, conf, contra, next) = if wired_bad {
             (
                 "lan:congestion",
@@ -442,21 +559,36 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
 
     // R7: critical wired asset unreachable / single service failure.
     let claimed: BTreeSet<String> = out.iter().flat_map(|h| h.scope_assets.clone()).collect();
-    for t in tv.iter().filter(|t| is_wired(t) && t.health == Health::Failed) {
-        let Some(asset) = t.asset.clone() else { continue };
+    for t in tv
+        .iter()
+        .filter(|t| is_wired(t) && t.health == Health::Failed)
+    {
+        let Some(asset) = t.asset.clone() else {
+            continue;
+        };
         if claimed.contains(&asset) || asset_kind(cfg, Some(&asset)) == Some(AssetKind::Wan) {
             continue;
         }
         if t.kind == "dns" {
             continue; // handled by DNS rule
         }
-        let others_ok = tv.iter().any(|o| is_wired(o) && o.asset.as_deref() != Some(asset.as_str()) && o.health == Health::Healthy);
+        let others_ok = tv.iter().any(|o| {
+            is_wired(o) && o.asset.as_deref() != Some(asset.as_str()) && o.health == Health::Healthy
+        });
         let corroborated: Vec<&&TargetView> = tv
             .iter()
-            .filter(|o| !is_wired(o) && o.asset.as_deref() == Some(asset.as_str()) && o.health == Health::Failed)
+            .filter(|o| {
+                !is_wired(o)
+                    && o.asset.as_deref() == Some(asset.as_str())
+                    && o.health == Health::Failed
+            })
             .collect();
         let service = matches!(t.kind.as_str(), "http" | "tcp");
-        let kind = if service && others_ok { HypKind::ServiceFailure } else { HypKind::AssetUnreachable };
+        let kind = if service && others_ok {
+            HypKind::ServiceFailure
+        } else {
+            HypKind::AssetUnreachable
+        };
         let key = format!("asset:{asset}");
         if out.iter().any(|h| h.key == key) {
             continue;
@@ -475,14 +607,28 @@ pub fn correlate(s: &Snapshot<'_>) -> Vec<Hypothesis> {
             } else {
                 format!("{asset} not responding to wired checks")
             },
-            confidence: if !corroborated.is_empty() { Confidence::High } else { Confidence::Medium },
+            confidence: if !corroborated.is_empty() {
+                Confidence::High
+            } else {
+                Confidence::Medium
+            },
             scope_assets: vec![asset.clone()],
             affected_nodes: vec![],
             evidence: std::iter::once(format!("{} (wired): {}", t.target_id, t.reason))
-                .chain(corroborated.iter().map(|o| format!("{} from {}: {}", o.target_id, o.vantage, o.reason)))
+                .chain(
+                    corroborated
+                        .iter()
+                        .map(|o| format!("{} from {}: {}", o.target_id, o.vantage, o.reason)),
+                )
                 .collect(),
-            contradicting: if others_ok { vec!["other wired checks healthy".into()] } else { vec![] },
-            alternatives: vec!["ICMP rate limiting/blocking (corroborate with a service check)".into()],
+            contradicting: if others_ok {
+                vec!["other wired checks healthy".into()]
+            } else {
+                vec![]
+            },
+            alternatives: vec![
+                "ICMP rate limiting/blocking (corroborate with a service check)".into(),
+            ],
             next_check: "check the asset's power, link and service status".into(),
         });
     }
@@ -525,7 +671,10 @@ impl IncidentEventKind {
     }
     /// Whether this lifecycle step warrants an outbound notification.
     pub fn notifies(self) -> bool {
-        matches!(self, Self::Opened | Self::Escalated | Self::Resolved | Self::Reopened)
+        matches!(
+            self,
+            Self::Opened | Self::Escalated | Self::Resolved | Self::Reopened
+        )
     }
 }
 
@@ -566,7 +715,10 @@ pub struct IncidentManager {
 impl IncidentManager {
     /// Restore the id counter after a restart (ids stay unique and stable).
     pub fn with_counter(counter: u64) -> Self {
-        Self { incidents: BTreeMap::new(), counter }
+        Self {
+            incidents: BTreeMap::new(),
+            counter,
+        }
     }
 
     pub fn counter(&self) -> u64 {
@@ -587,13 +739,19 @@ impl IncidentManager {
     }
 
     /// Reconcile the current hypotheses with open incidents.
-    pub fn reconcile(&mut self, hyps: Vec<Hypothesis>, now: UnixMs, th: &Thresholds) -> Vec<IncidentEvent> {
+    pub fn reconcile(
+        &mut self,
+        hyps: Vec<Hypothesis>,
+        now: UnixMs,
+        th: &Thresholds,
+    ) -> Vec<IncidentEvent> {
         let mut events = Vec::new();
         let present: BTreeSet<String> = hyps.iter().map(|h| h.key.clone()).collect();
         for h in hyps {
             match self.incidents.get_mut(&h.key) {
                 Some(inc) if inc.status == IncidentStatus::Open => {
-                    let escalated = h.severity > inc.severity || h.affected_nodes.len() > inc.hypothesis.affected_nodes.len();
+                    let escalated = h.severity > inc.severity
+                        || h.affected_nodes.len() > inc.hypothesis.affected_nodes.len();
                     let changed = h.kind != inc.hypothesis.kind || h.cause != inc.hypothesis.cause;
                     inc.severity = inc.severity.max(h.severity);
                     inc.last_evidence_at = now;
@@ -616,7 +774,9 @@ impl IncidentManager {
                 }
                 Some(inc)
                     if inc.status == IncidentStatus::Resolved
-                        && inc.resolved_at.is_some_and(|r| now - r <= th.recurrence_window_ms) =>
+                        && inc
+                            .resolved_at
+                            .is_some_and(|r| now - r <= th.recurrence_window_ms) =>
                 {
                     inc.status = IncidentStatus::Open;
                     inc.flaps += 1;
@@ -659,7 +819,11 @@ impl IncidentManager {
                     inc.recovering_since = Some(now);
                     events.push(Self::event(inc, IncidentEventKind::Recovering, now));
                 }
-                IncidentStatus::Recovering if inc.recovering_since.is_some_and(|t| now - t >= th.recovery_stable_ms) => {
+                IncidentStatus::Recovering
+                    if inc
+                        .recovering_since
+                        .is_some_and(|t| now - t >= th.recovery_stable_ms) =>
+                {
                     inc.status = IncidentStatus::Resolved;
                     inc.resolved_at = Some(now);
                     inc.recovering_since = None;
@@ -672,12 +836,14 @@ impl IncidentManager {
     }
 
     pub fn active(&self) -> impl Iterator<Item = &Incident> {
-        self.incidents.values().filter(|i| i.status != IncidentStatus::Resolved)
+        self.incidents
+            .values()
+            .filter(|i| i.status != IncidentStatus::Resolved)
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -699,7 +865,11 @@ assets:
     }
 
     fn node(id: &str, l: NodeLiveness, ap: &str) -> NodeView {
-        NodeView { id: id.into(), liveness: l, ap: Some(ap.into()) }
+        NodeView {
+            id: id.into(),
+            liveness: l,
+            ap: Some(ap.into()),
+        }
     }
 
     fn tgt(v: &str, id: &str, kind: &str, asset: &str, h: Health) -> TargetView {
@@ -724,11 +894,29 @@ assets:
             node("n4", NodeLiveness::Online, "ap-b"),
         ];
         let roams = [
-            RoamView { node: "n2".into(), from_ap: "ap-a".into(), to_ap: Some("ap-b".into()), at: 1000 },
-            RoamView { node: "n3".into(), from_ap: "ap-a".into(), to_ap: Some("ap-b".into()), at: 1000 },
+            RoamView {
+                node: "n2".into(),
+                from_ap: "ap-a".into(),
+                to_ap: Some("ap-b".into()),
+                at: 1000,
+            },
+            RoamView {
+                node: "n3".into(),
+                from_ap: "ap-a".into(),
+                to_ap: Some("ap-b".into()),
+                at: 1000,
+            },
         ];
         let targets = [tgt(CENTRAL, "ap-a-mgmt", "icmp", "ap-a", Health::Failed)];
-        let s = Snapshot { config: &c, now: 2000, ingestion_ok: true, nodes: &nodes, targets: &targets, roams: &roams, radios: &[] };
+        let s = Snapshot {
+            config: &c,
+            now: 2000,
+            ingestion_ok: true,
+            nodes: &nodes,
+            targets: &targets,
+            roams: &roams,
+            radios: &[],
+        };
         let h = correlate(&s);
         assert_eq!(h.len(), 1, "{h:#?}");
         assert_eq!(h[0].kind, HypKind::ApUnavailable);
@@ -741,7 +929,15 @@ assets:
     fn ingestion_down_suppresses_node_claims() {
         let c = cfg();
         let nodes = [node("n1", NodeLiveness::Unknown, "ap-a")];
-        let s = Snapshot { config: &c, now: 0, ingestion_ok: false, nodes: &nodes, targets: &[], roams: &[], radios: &[] };
+        let s = Snapshot {
+            config: &c,
+            now: 0,
+            ingestion_ok: false,
+            nodes: &nodes,
+            targets: &[],
+            roams: &[],
+            radios: &[],
+        };
         let h = correlate(&s);
         assert_eq!(h.len(), 1);
         assert_eq!(h[0].kind, HypKind::ObservabilityOutage);
@@ -754,7 +950,15 @@ assets:
             tgt(CENTRAL, "gw", "icmp", "gateway", Health::Healthy),
             tgt(CENTRAL, "ext1", "http", "wan-1", Health::Failed),
         ];
-        let s = Snapshot { config: &c, now: 0, ingestion_ok: true, nodes: &[], targets: &targets, roams: &[], radios: &[] };
+        let s = Snapshot {
+            config: &c,
+            now: 0,
+            ingestion_ok: true,
+            nodes: &[],
+            targets: &targets,
+            roams: &[],
+            radios: &[],
+        };
         let h = correlate(&s);
         assert!(h.iter().all(|x| x.kind != HypKind::WanOutage));
     }
@@ -779,17 +983,33 @@ assets:
         };
         let e = m.reconcile(vec![h.clone()], 0, &th);
         assert_eq!(e[0].kind, IncidentEventKind::Opened);
-        assert!(m.reconcile(vec![h.clone()], 1000, &th).is_empty(), "no duplicate events");
-        assert_eq!(m.reconcile(vec![], 2000, &th)[0].kind, IncidentEventKind::Recovering);
+        assert!(
+            m.reconcile(vec![h.clone()], 1000, &th).is_empty(),
+            "no duplicate events"
+        );
+        assert_eq!(
+            m.reconcile(vec![], 2000, &th)[0].kind,
+            IncidentEventKind::Recovering
+        );
         assert!(m.reconcile(vec![], 5000, &th).is_empty());
-        assert_eq!(m.reconcile(vec![], 2000 + th.recovery_stable_ms, &th)[0].kind, IncidentEventKind::Resolved);
+        assert_eq!(
+            m.reconcile(vec![], 2000 + th.recovery_stable_ms, &th)[0].kind,
+            IncidentEventKind::Resolved
+        );
         let e = m.reconcile(vec![h.clone()], 60_000, &th);
         assert_eq!(e[0].kind, IncidentEventKind::Reopened);
         assert_eq!(e[0].episode, 2);
-        assert_eq!(e[0].incident_id, "inc-000001", "same incident within recurrence window");
+        assert_eq!(
+            e[0].incident_id, "inc-000001",
+            "same incident within recurrence window"
+        );
         m.reconcile(vec![], 70_000, &th);
         m.reconcile(vec![], 70_000 + th.recovery_stable_ms, &th);
-        let e = m.reconcile(vec![h], 70_000 + th.recovery_stable_ms + th.recurrence_window_ms + 1, &th);
+        let e = m.reconcile(
+            vec![h],
+            70_000 + th.recovery_stable_ms + th.recurrence_window_ms + 1,
+            &th,
+        );
         assert_eq!(e[0].kind, IncidentEventKind::Opened);
         assert_eq!(e[0].incident_id, "inc-000002");
     }

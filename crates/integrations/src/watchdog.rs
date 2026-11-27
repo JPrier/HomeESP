@@ -26,6 +26,11 @@ pub async fn ping(url: &str, timeout: Duration) -> Result<(), String> {
 mod tests {
     #[tokio::test]
     async fn refuses_plain_http() {
-        assert!(super::ping("http://example.invalid", std::time::Duration::from_millis(10)).await.is_err());
+        assert!(super::ping(
+            "http://example.invalid",
+            std::time::Duration::from_millis(10)
+        )
+        .await
+        .is_err());
     }
 }

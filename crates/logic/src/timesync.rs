@@ -79,17 +79,26 @@ impl OffsetEstimator {
         let lo = received_at.saturating_sub(MAX_SAMPLE_AGE_MS);
         if raw < lo {
             // Implausible: clamp into the window and mark the time as unknown-precision.
-            return Mapped { observed_at: lo, uncertainty_ms: u32::MAX };
+            return Mapped {
+                observed_at: lo,
+                uncertainty_ms: u32::MAX,
+            };
         }
         let observed = raw.min(received_at);
         let drift = i64::from(age_ms) * DRIFT_PPM / 1_000_000;
-        let unc = self.spread_ms().saturating_add(drift).max(MIN_UNCERTAINTY_MS);
-        Mapped { observed_at: observed, uncertainty_ms: u32::try_from(unc).unwrap_or(u32::MAX) }
+        let unc = self
+            .spread_ms()
+            .saturating_add(drift)
+            .max(MIN_UNCERTAINTY_MS);
+        Mapped {
+            observed_at: observed,
+            uncertainty_ms: u32::try_from(unc).unwrap_or(u32::MAX),
+        }
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use proptest::prelude::*;

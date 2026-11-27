@@ -217,7 +217,10 @@ impl ProbeOutcome {
     }
     /// Whether this outcome is an eligible attempt (denominator of loss).
     pub const fn is_eligible(self) -> bool {
-        matches!(self, Self::Success | Self::Timeout | Self::RefusedUnreachable | Self::InvalidResponse)
+        matches!(
+            self,
+            Self::Success | Self::Timeout | Self::RefusedUnreachable | Self::InvalidResponse
+        )
     }
 }
 
@@ -620,7 +623,10 @@ pub enum Record<'a> {
     TrackedBssid([u8; 6]),
     Ack(Ack),
     /// A record type this version does not understand; skipped by consumers.
-    Unknown { rtype: u8, len: u16 },
+    Unknown {
+        rtype: u8,
+        len: u16,
+    },
 }
 
 impl Record<'_> {

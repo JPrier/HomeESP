@@ -241,14 +241,24 @@ pub fn parse_response(msg: &[u8], expect_id: i32) -> Option<Vec<(Vec<u32>, Value
 }
 
 /// One v2c GET over UDP with a timeout (no retries).
-pub async fn get(addr: SocketAddr, community: &str, oids: &[Vec<u32>], timeout: Duration) -> Result<Vec<(Vec<u32>, Value)>, String> {
+pub async fn get(
+    addr: SocketAddr,
+    community: &str,
+    oids: &[Vec<u32>],
+    timeout: Duration,
+) -> Result<Vec<(Vec<u32>, Value)>, String> {
     let id: i32 = rand::random::<i32>() & 0x7FFF_FFFF;
     let req = get_request(community, id, oids).ok_or("bad oid")?;
-    let sock = tokio::net::UdpSocket::bind("0.0.0.0:0").await.map_err(|e| e.to_string())?;
+    let sock = tokio::net::UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| e.to_string())?;
     sock.connect(addr).await.map_err(|e| e.to_string())?;
     sock.send(&req).await.map_err(|e| e.to_string())?;
     let mut buf = vec![0u8; 4096];
-    let n = tokio::time::timeout(timeout, sock.recv(&mut buf)).await.map_err(|_| "timeout".to_string())?.map_err(|e| e.to_string())?;
+    let n = tokio::time::timeout(timeout, sock.recv(&mut buf))
+        .await
+        .map_err(|_| "timeout".to_string())?
+        .map_err(|e| e.to_string())?;
     parse_response(buf.get(..n).unwrap_or(&[]), id).ok_or_else(|| "malformed response".into())
 }
 
@@ -272,25 +282,46 @@ pub mod oid {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
     fn s(t: i64, v: u64, bits: u8, up: u64) -> CounterSample {
-        CounterSample { t_ms: t, value: v, bits, uptime_cs: up, if_index: 1 }
+        CounterSample {
+            t_ms: t,
+            value: v,
+            bits,
+            uptime_cs: up,
+            if_index: 1,
+        }
     }
 
     #[test]
     fn rates_wraps_and_resets() {
-        assert_eq!(rate(&s(0, 1000, 64, 10), &s(1000, 3000, 64, 110)), Rate::PerSecond(2000.0));
+        assert_eq!(
+            rate(&s(0, 1000, 64, 10), &s(1000, 3000, 64, 110)),
+            Rate::PerSecond(2000.0)
+        );
         // 32-bit wrap
-        let r = rate(&s(0, u64::from(u32::MAX) - 99, 32, 10), &s(1000, 100, 32, 110));
+        let r = rate(
+            &s(0, u64::from(u32::MAX) - 99, 32, 10),
+            &s(1000, 100, 32, 110),
+        );
         assert_eq!(r, Rate::PerSecond(200.0));
         // reboot: uptime went backwards -> reset, never a spike
-        assert_eq!(rate(&s(0, 5_000_000, 64, 1000), &s(1000, 10, 64, 5)), Rate::Reset);
+        assert_eq!(
+            rate(&s(0, 5_000_000, 64, 1000), &s(1000, 10, 64, 5)),
+            Rate::Reset
+        );
         // 64-bit counter going backwards without reboot -> reset
-        assert_eq!(rate(&s(0, 5000, 64, 10), &s(1000, 10, 64, 110)), Rate::Reset);
-        assert_eq!(rate(&s(1000, 0, 64, 1), &s(1000, 1, 64, 2)), Rate::InvalidInterval);
+        assert_eq!(
+            rate(&s(0, 5000, 64, 10), &s(1000, 10, 64, 110)),
+            Rate::Reset
+        );
+        assert_eq!(
+            rate(&s(1000, 0, 64, 1), &s(1000, 1, 64, 2)),
+            Rate::InvalidInterval
+        );
         let mut other = s(1000, 10, 64, 2);
         other.if_index = 2;
         assert_eq!(rate(&s(0, 0, 64, 1), &other), Rate::IndexChanged);

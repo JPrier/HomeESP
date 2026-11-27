@@ -29,6 +29,10 @@ expect_used = "deny"
 panic = "deny"
 dbg_macro = "deny"
 todo = "deny"
+# Style lints judged not to improve these codebases (documented in docs/quality.md):
+too_many_arguments = "allow"
+type_complexity = "allow"
+field_reassign_with_default = "allow"
 
 [workspace.dependencies]
 heapless = "0.8"

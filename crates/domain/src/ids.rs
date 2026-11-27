@@ -15,7 +15,8 @@ pub fn valid_id(s: &str) -> bool {
         && b.len() <= 32
         && b.first() != Some(&b'-')
         && b.last() != Some(&b'-')
-        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
 macro_rules! id_type {
@@ -76,7 +77,7 @@ id_type!(
 );
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 

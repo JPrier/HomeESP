@@ -22,8 +22,17 @@ fn meta(seq: u64, at: UnixMs) -> BatchMeta {
 
 fn probe(at: UnixMs, idx: u16, seq: u64, outcome: Outcome, rtt: Option<u32>) -> Observation {
     Observation {
-        prov: Provenance { source: "node-01".into(), boot_id: "b1".into(), sequence: seq, index: idx },
-        time: EventTime { observed_at: at, uncertainty_ms: 20, received_at: at },
+        prov: Provenance {
+            source: "node-01".into(),
+            boot_id: "b1".into(),
+            sequence: seq,
+            index: idx,
+        },
+        time: EventTime {
+            observed_at: at,
+            uncertainty_ms: 20,
+            received_at: at,
+        },
         kind: ObsKind::Probe(ProbeObs {
             target_id: "gw-icmp".into(),
             kind: "icmp".into(),
@@ -50,8 +59,14 @@ fn migrates_and_reports_version() {
 fn duplicate_frames_are_idempotent() {
     let mut s = Store::open_in_memory().unwrap();
     let o = [probe(60_000, 0, 1, Outcome::Success, Some(1500))];
-    assert!(matches!(s.insert_frame(&meta(1, 60_000), &o).unwrap(), InsertOutcome::Inserted(_)));
-    assert_eq!(s.insert_frame(&meta(1, 60_000), &o).unwrap(), InsertOutcome::Duplicate);
+    assert!(matches!(
+        s.insert_frame(&meta(1, 60_000), &o).unwrap(),
+        InsertOutcome::Inserted(_)
+    ));
+    assert_eq!(
+        s.insert_frame(&meta(1, 60_000), &o).unwrap(),
+        InsertOutcome::Duplicate
+    );
     let c = s.counts().unwrap();
     assert_eq!(c["batches"], 1);
     assert_eq!(c["probe_results"], 1);
@@ -61,7 +76,10 @@ fn duplicate_frames_are_idempotent() {
 fn db_rejects_rtt_on_failed_probe() {
     let mut s = Store::open_in_memory().unwrap();
     let bad = [probe(60_000, 0, 1, Outcome::Timeout, Some(5))];
-    assert!(s.insert_frame(&meta(1, 60_000), &bad).is_err(), "CHECK constraint must refuse RTT on failure");
+    assert!(
+        s.insert_frame(&meta(1, 60_000), &bad).is_err(),
+        "CHECK constraint must refuse RTT on failure"
+    );
     assert_eq!(s.counts().unwrap()["batches"], 0, "transaction rolled back");
 }
 
@@ -72,10 +90,22 @@ fn rollups_and_series_preserve_loss_denominator() {
     for i in 0..20u64 {
         let ok = i % 4 != 0;
         let at = base + i as i64 * 5_000;
-        let o = [probe(at, 0, i + 1, if ok { Outcome::Success } else { Outcome::Timeout }, ok.then_some(2000 + i as u32 * 10))];
+        let o = [probe(
+            at,
+            0,
+            i + 1,
+            if ok {
+                Outcome::Success
+            } else {
+                Outcome::Timeout
+            },
+            ok.then_some(2000 + i as u32 * 10),
+        )];
         s.insert_frame(&meta(i + 1, at), &o).unwrap();
     }
-    let series = s.probe_series("gw-icmp", None, base, base + 120_000, 100).unwrap();
+    let series = s
+        .probe_series("gw-icmp", None, base, base + 120_000, 100)
+        .unwrap();
     assert_eq!(series.len(), 1);
     let pts = &series[0].points;
     assert_eq!(pts.len(), 2);
@@ -93,16 +123,31 @@ fn rollups_and_series_preserve_loss_denominator() {
 #[test]
 fn outbox_dedup_retry_and_permanent_failure() {
     let mut s = Store::open_in_memory().unwrap();
-    let item = ("inc-1|opened|1|ntfy".to_string(), "ntfy".to_string(), "{}".to_string(), 1000i64, false);
-    s.commit_derived(&[], &[], &[item.clone()], &[], Some(("checkpoint", "1"))).unwrap();
+    let item = (
+        "inc-1|opened|1|ntfy".to_string(),
+        "ntfy".to_string(),
+        "{}".to_string(),
+        1000i64,
+        false,
+    );
+    s.commit_derived(
+        &[],
+        &[],
+        std::slice::from_ref(&item),
+        &[],
+        Some(("checkpoint", "1")),
+    )
+    .unwrap();
     s.commit_derived(&[], &[], &[item], &[], None).unwrap();
     let due = s.outbox_due(1000, 10).unwrap();
     assert_eq!(due.len(), 1, "dedup key prevents duplicates");
-    s.outbox_attempt(due[0].id, 1000, false, Some("timeout"), Some(5000)).unwrap();
+    s.outbox_attempt(due[0].id, 1000, false, Some("timeout"), Some(5000))
+        .unwrap();
     assert!(s.outbox_due(2000, 10).unwrap().is_empty());
     let due = s.outbox_due(5000, 10).unwrap();
     assert_eq!(due[0].attempts, 1);
-    s.outbox_attempt(due[0].id, 5000, false, Some("403"), None).unwrap();
+    s.outbox_attempt(due[0].id, 5000, false, Some("403"), None)
+        .unwrap();
     assert_eq!(s.outbox_list(Some("failed"), 10).unwrap().len(), 1);
     assert_eq!(s.kv_get("checkpoint").unwrap().as_deref(), Some("1"));
 }
@@ -110,7 +155,14 @@ fn outbox_dedup_retry_and_permanent_failure() {
 #[test]
 fn suppressed_notifications_are_recorded_not_due() {
     let mut s = Store::open_in_memory().unwrap();
-    s.commit_derived(&[], &[], &[("k".into(), "ntfy".into(), "{}".into(), 0, true)], &[], None).unwrap();
+    s.commit_derived(
+        &[],
+        &[],
+        &[("k".into(), "ntfy".into(), "{}".into(), 0, true)],
+        &[],
+        None,
+    )
+    .unwrap();
     assert!(s.outbox_due(10, 10).unwrap().is_empty());
     assert_eq!(s.outbox_list(Some("suppressed"), 10).unwrap().len(), 1);
 }
@@ -119,7 +171,11 @@ fn suppressed_notifications_are_recorded_not_due() {
 fn retention_is_bounded_and_cascades() {
     let mut s = Store::open_in_memory().unwrap();
     for i in 0..50u64 {
-        s.insert_frame(&meta(i + 1, i as i64), &[probe(i as i64, 0, i + 1, Outcome::Success, Some(100))]).unwrap();
+        s.insert_frame(
+            &meta(i + 1, i as i64),
+            &[probe(i as i64, 0, i + 1, Outcome::Success, Some(100))],
+        )
+        .unwrap();
     }
     let now = 30 * 86_400_000i64;
     let r = Retention::default();
@@ -128,7 +184,10 @@ fn retention_is_bounded_and_cascades() {
     s.retention(now, &r, 100).unwrap();
     let c = s.counts().unwrap();
     assert_eq!(c["batches"], 0);
-    assert_eq!(c["probe_results"], 0, "observations cascade with their batch");
+    assert_eq!(
+        c["probe_results"], 0,
+        "observations cascade with their batch"
+    );
 }
 
 #[test]
@@ -137,9 +196,17 @@ fn backup_and_restore_roundtrip() {
     let db = dir.path().join("live.sqlite");
     let bak = dir.path().join("backup.sqlite");
     let mut s = Store::open(&db).unwrap();
-    s.insert_frame(&meta(1, 10), &[probe(10, 0, 1, Outcome::Success, Some(100))]).unwrap();
+    s.insert_frame(
+        &meta(1, 10),
+        &[probe(10, 0, 1, Outcome::Success, Some(100))],
+    )
+    .unwrap();
     s.backup_to(&bak).unwrap();
-    s.insert_frame(&meta(2, 20), &[probe(20, 0, 2, Outcome::Success, Some(100))]).unwrap();
+    s.insert_frame(
+        &meta(2, 20),
+        &[probe(20, 0, 2, Outcome::Success, Some(100))],
+    )
+    .unwrap();
     let restored = Store::open(&bak).unwrap();
     assert_eq!(restored.integrity_check().unwrap(), "ok");
     assert_eq!(restored.counts().unwrap()["batches"], 1);
@@ -149,8 +216,17 @@ fn backup_and_restore_roundtrip() {
 fn purge_device_removes_identity_data() {
     let mut s = Store::open_in_memory().unwrap();
     let ble = Observation {
-        prov: Provenance { source: "node-01".into(), boot_id: "b1".into(), sequence: 1, index: 0 },
-        time: EventTime { observed_at: 1, uncertainty_ms: 20, received_at: 1 },
+        prov: Provenance {
+            source: "node-01".into(),
+            boot_id: "b1".into(),
+            sequence: 1,
+            index: 0,
+        },
+        time: EventTime {
+            observed_at: 1,
+            uncertainty_ms: 20,
+            received_at: 1,
+        },
         kind: ObsKind::Ble(BleObs {
             device_id: "phone-1".into(),
             window_ms: 2000,

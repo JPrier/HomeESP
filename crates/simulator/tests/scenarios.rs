@@ -6,7 +6,13 @@ use ho_simulator::scenarios;
 fn assert_scenario(id: &str) {
     let r = scenarios::run(id, 42).unwrap();
     let failed: Vec<_> = r.checks.iter().filter(|c| !c.1).collect();
-    assert!(failed.is_empty(), "{id} {} failed checks: {failed:?}\nmetrics: {:?}\nnotes: {:?}", r.title, r.metrics, r.notes);
+    assert!(
+        failed.is_empty(),
+        "{id} {} failed checks: {failed:?}\nmetrics: {:?}\nnotes: {:?}",
+        r.title,
+        r.metrics,
+        r.notes
+    );
 }
 
 #[test]

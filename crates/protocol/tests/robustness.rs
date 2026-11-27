@@ -1,5 +1,10 @@
 //! Malformed-input, bounds and property tests for the decoder/encoder.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use ho_protocol::*;
 use proptest::prelude::*;
@@ -34,7 +39,8 @@ fn probe(target: &str, outcome: ProbeOutcome, rtt: Option<u32>) -> Record<'_> {
 fn one_probe_frame() -> Vec<u8> {
     let mut buf = [0u8; 256];
     let mut w = FrameWriter::new(&mut buf, &hdr("node-01"), 256).unwrap();
-    w.push(&probe("gw", ProbeOutcome::Success, Some(900))).unwrap();
+    w.push(&probe("gw", ProbeOutcome::Success, Some(900)))
+        .unwrap();
     let n = w.finish();
     buf[..n].to_vec()
 }
@@ -46,7 +52,10 @@ fn rejects_bad_magic_schema_kind() {
     assert_eq!(decode_frame(&f).unwrap_err(), DecodeError::BadMagic);
     let mut f = one_probe_frame();
     f[2] = 2;
-    assert_eq!(decode_frame(&f).unwrap_err(), DecodeError::UnsupportedSchema(2));
+    assert_eq!(
+        decode_frame(&f).unwrap_err(),
+        DecodeError::UnsupportedSchema(2)
+    );
     let mut f = one_probe_frame();
     f[4] = 99;
     assert_eq!(decode_frame(&f).unwrap_err(), DecodeError::UnknownKind(99));
@@ -83,11 +92,13 @@ fn rtt_only_on_success() {
     let mut buf = [0u8; 128];
     let mut w = FrameWriter::new(&mut buf, &hdr("n1"), 128).unwrap();
     assert_eq!(
-        w.push(&probe("gw", ProbeOutcome::Timeout, Some(5))).unwrap_err(),
+        w.push(&probe("gw", ProbeOutcome::Timeout, Some(5)))
+            .unwrap_err(),
         EncodeError::InvalidField
     );
     assert_eq!(
-        w.push(&probe("gw", ProbeOutcome::Success, None)).unwrap_err(),
+        w.push(&probe("gw", ProbeOutcome::Success, None))
+            .unwrap_err(),
         EncodeError::InvalidField
     );
     // Hand-craft a frame whose timeout claims an RTT: decoder must refuse it.
@@ -96,7 +107,10 @@ fn rtt_only_on_success() {
     let hdr_len = HEADER_FIXED_BYTES + "node-01".len();
     let outcome_at = hdr_len + 1 + 2 + 4 + 1 + 2 + 1;
     f[outcome_at] = ProbeOutcome::Timeout as u8;
-    assert!(matches!(decode_frame(&f), Err(DecodeError::InvalidField { .. })));
+    assert!(matches!(
+        decode_frame(&f),
+        Err(DecodeError::InvalidField { .. })
+    ));
 }
 
 #[test]
@@ -114,7 +128,12 @@ fn unknown_record_types_are_skipped_and_long_records_keep_prefix() {
     // A NodeStatus with 4 extra trailing bytes (future additive fields) still decodes.
     let mut buf = [0u8; 128];
     let mut w = FrameWriter::new(&mut buf, &hdr("n1"), 128).unwrap();
-    w.push(&Record::NodeStatus(NodeStatus { online: true, reason: 0, uptime_s: 5 })).unwrap();
+    w.push(&Record::NodeStatus(NodeStatus {
+        online: true,
+        reason: 0,
+        uptime_s: 5,
+    }))
+    .unwrap();
     let n = w.finish();
     let mut v = buf[..n].to_vec();
     let len_at = HEADER_FIXED_BYTES + 2 + 1;
@@ -128,9 +147,14 @@ fn unknown_record_types_are_skipped_and_long_records_keep_prefix() {
 fn writer_is_unchanged_after_failed_push() {
     let mut buf = [0u8; 80];
     let mut w = FrameWriter::new(&mut buf, &hdr("node-01"), 80).unwrap();
-    w.push(&probe("gw", ProbeOutcome::Success, Some(1))).unwrap();
+    w.push(&probe("gw", ProbeOutcome::Success, Some(1)))
+        .unwrap();
     let before = w.len();
-    let err = w.push(&probe("a-much-longer-target-id", ProbeOutcome::Success, Some(1)));
+    let err = w.push(&probe(
+        "a-much-longer-target-id",
+        ProbeOutcome::Success,
+        Some(1),
+    ));
     assert_eq!(err.unwrap_err(), EncodeError::BufferFull);
     assert_eq!(w.len(), before);
     let n = w.finish();
@@ -143,7 +167,10 @@ fn max_frame_limit_is_enforced() {
     let mut buf = [0u8; 4096];
     let mut w = FrameWriter::new(&mut buf, &hdr("node-01"), 4096).unwrap();
     let mut pushed = 0;
-    while w.push(&probe("gateway-icmp", ProbeOutcome::Success, Some(1))).is_ok() {
+    while w
+        .push(&probe("gateway-icmp", ProbeOutcome::Success, Some(1)))
+        .is_ok()
+    {
         pushed += 1;
     }
     let n = w.finish();

@@ -65,7 +65,9 @@ fn reject(app: &App, node: Option<&str>, topic: &str, reason: &str, payload: &[u
 pub async fn handle(app: &App, topic: &str, payload: &[u8]) {
     let received_at = now_ms();
     let started = Instant::now();
-    app.metrics.bytes_in.fetch_add(payload.len() as u64, std::sync::atomic::Ordering::Relaxed);
+    app.metrics
+        .bytes_in
+        .fetch_add(payload.len() as u64, std::sync::atomic::Ordering::Relaxed);
     let prefix = app.cfg.topic_prefix();
     let Some((node, suffix)) = parse_topic(&prefix, topic) else {
         return reject(app, None, topic, "bad_topic", &[]);
@@ -75,7 +77,11 @@ pub async fn handle(app: &App, topic: &str, payload: &[u8]) {
     }
     // Last will: literal "offline" on the status topic.
     if suffix == "status" && payload == b"offline" {
-        let fx = app.apply(Input::NodeStatus { node: node.into(), online: false, at: received_at });
+        let fx = app.apply(Input::NodeStatus {
+            node: node.into(),
+            online: false,
+            at: received_at,
+        });
         effects::handle(app, fx).await;
         return;
     }
@@ -87,11 +93,15 @@ pub async fn handle(app: &App, topic: &str, payload: &[u8]) {
     }
     // Per-node frame budget: shed disposable telemetry first, keep critical events.
     let over_budget = {
-        let Ok(mut st) = app.ingest.lock() else { return };
+        let Ok(mut st) = app.ingest.lock() else {
+            return;
+        };
         let n = st.nodes.entry(node.to_string()).or_default();
         let rate = f64::from(app.cfg.server.max_frames_per_node_per_s.max(1));
         let now = Instant::now();
-        let dt = n.last_refill.map_or(rate, |l| now.duration_since(l).as_secs_f64() * rate);
+        let dt = n
+            .last_refill
+            .map_or(rate, |l| now.duration_since(l).as_secs_f64() * rate);
         n.tokens = (n.tokens + dt).min(rate * 2.0);
         n.last_refill = Some(now);
         if n.tokens >= 1.0 {
@@ -119,11 +129,17 @@ pub async fn handle(app: &App, topic: &str, payload: &[u8]) {
 
     // Time + sequence bookkeeping (per node, per boot).
     let (verdict, uncertainty, obs) = {
-        let Ok(mut st) = app.ingest.lock() else { return };
+        let Ok(mut st) = app.ingest.lock() else {
+            return;
+        };
         let n = st.nodes.entry(node.to_string()).or_default();
         n.clock.observe(h.boot_id, h.sent_mono_ms, received_at);
         let verdict = n.seq.observe(h.boot_id, h.sequence);
-        let ctx = FrameCtx { received_at, clock: &n.clock, current_bssid: n.last_bssid.clone() };
+        let ctx = FrameCtx {
+            received_at,
+            clock: &n.clock,
+            current_bssid: n.last_bssid.clone(),
+        };
         let obs = normalize(&frame, &ctx);
         for o in &obs {
             if let ho_domain::ObsKind::Wifi(w) = &o.kind {
@@ -177,25 +193,42 @@ pub async fn handle(app: &App, topic: &str, payload: &[u8]) {
     if verdict == SeqVerdict::Duplicate {
         return; // already processed in memory (should be caught by storage too)
     }
-    app.metrics.observations.fetch_add(obs.len() as u64, std::sync::atomic::Ordering::Relaxed);
-    let lag = obs.iter().map(|o| (received_at - o.time.observed_at).max(0)).max().unwrap_or(0) as u64;
-    app.metrics.ingest_lag_ms_last.store(lag, std::sync::atomic::Ordering::Relaxed);
-    app.metrics.ingest_lag_ms_max.fetch_max(lag, std::sync::atomic::Ordering::Relaxed);
+    app.metrics
+        .observations
+        .fetch_add(obs.len() as u64, std::sync::atomic::Ordering::Relaxed);
+    let lag = obs
+        .iter()
+        .map(|o| (received_at - o.time.observed_at).max(0))
+        .max()
+        .unwrap_or(0) as u64;
+    app.metrics
+        .ingest_lag_ms_last
+        .store(lag, std::sync::atomic::Ordering::Relaxed);
+    app.metrics
+        .ingest_lag_ms_max
+        .fetch_max(lag, std::sync::atomic::Ordering::Relaxed);
     if !obs.is_empty() {
         let fx = app.apply(Input::Observations(obs));
         effects::handle(app, fx).await;
     }
-    app.metrics
-        .process_us_last
-        .store(u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX), std::sync::atomic::Ordering::Relaxed);
+    app.metrics.process_us_last.store(
+        u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX),
+        std::sync::atomic::Ordering::Relaxed,
+    );
 }
 
 async fn send_ack(app: &App, node: &str, boot: [u8; 16], seq: u64) {
-    let Some(client) = app.mqtt_client() else { return };
+    let Some(client) = app.mqtt_client() else {
+        return;
+    };
     match crate::desired::ack_frame(node, boot, seq, app.next_server_seq()) {
         Ok(f) => {
             let topic = format!("{}/nodes/{node}/ack", app.cfg.topic_prefix());
-            if client.publish(topic, QoS::AtLeastOnce, false, f).await.is_ok() {
+            if client
+                .publish(topic, QoS::AtLeastOnce, false, f)
+                .await
+                .is_ok()
+            {
                 Metrics::inc(&app.metrics.acks_sent);
             }
         }
@@ -243,9 +276,22 @@ async fn record_config_status(app: &App, node: &str, frame: &p::Frame<'_>) {
                 p::ConfigState::Rejected => "rejected",
                 p::ConfigState::Pending => "pending",
             };
-            let _ = app.writer.send(WriteCmd::ConfigStatus { node: node.into(), revision: s.revision, state: state.into(), reason: s.reason }).await;
+            let _ = app
+                .writer
+                .send(WriteCmd::ConfigStatus {
+                    node: node.into(),
+                    revision: s.revision,
+                    state: state.into(),
+                    reason: s.reason,
+                })
+                .await;
             if s.state == p::ConfigState::Rejected {
-                tracing::warn!(node, revision = s.revision, reason = s.reason, "node rejected desired config");
+                tracing::warn!(
+                    node,
+                    revision = s.revision,
+                    reason = s.reason,
+                    "node rejected desired config"
+                );
             }
         }
     }
@@ -258,10 +304,22 @@ mod tests {
     #[test]
     fn topic_parsing_is_strict() {
         let pfx = "observatory/v1/home";
-        assert_eq!(parse_topic(pfx, "observatory/v1/home/nodes/node-01/telemetry"), Some(("node-01", "telemetry")));
-        assert_eq!(parse_topic(pfx, "observatory/v1/home/nodes/node-01/config/reported"), Some(("node-01", "config/reported")));
-        assert_eq!(parse_topic(pfx, "observatory/v1/other/nodes/node-01/telemetry"), None);
-        assert_eq!(parse_topic(pfx, "observatory/v1/home/nodes/Bad/telemetry"), None);
+        assert_eq!(
+            parse_topic(pfx, "observatory/v1/home/nodes/node-01/telemetry"),
+            Some(("node-01", "telemetry"))
+        );
+        assert_eq!(
+            parse_topic(pfx, "observatory/v1/home/nodes/node-01/config/reported"),
+            Some(("node-01", "config/reported"))
+        );
+        assert_eq!(
+            parse_topic(pfx, "observatory/v1/other/nodes/node-01/telemetry"),
+            None
+        );
+        assert_eq!(
+            parse_topic(pfx, "observatory/v1/home/nodes/Bad/telemetry"),
+            None
+        );
         assert_eq!(expected_kind("ack"), None, "nodes never publish acks");
     }
 }

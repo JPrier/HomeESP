@@ -52,21 +52,47 @@ pub async fn handle(app: &App, fx: Vec<Effect>) {
             Effect::Notify(n) => outbox.extend(route(app, n)),
             Effect::Location(l) => locations.push(l.clone()),
             Effect::LocationPurged { device_id, .. } => purge.push(device_id.clone()),
-            Effect::NodeLiveness { node, liveness, .. } => tracing::info!(node, ?liveness, "node liveness"),
-            Effect::TargetHealth { vantage, target, health, reason, .. } => {
-                tracing::info!(vantage, target, health = health.as_str(), reason, "target health")
+            Effect::NodeLiveness { node, liveness, .. } => {
+                tracing::info!(node, ?liveness, "node liveness")
+            }
+            Effect::TargetHealth {
+                vantage,
+                target,
+                health,
+                reason,
+                ..
+            } => {
+                tracing::info!(
+                    vantage,
+                    target,
+                    health = health.as_str(),
+                    reason,
+                    "target health"
+                )
             }
             Effect::BleDiscarded { .. } => {}
         }
     }
     if !events.is_empty() || !outbox.is_empty() || !locations.is_empty() {
         let incidents: Vec<Incident> = {
-            let keys: std::collections::BTreeSet<&str> = events.iter().map(|e| e.key.as_str()).collect();
-            app.with_engine(|eng| eng.snapshot().incidents.into_iter().filter(|i| keys.contains(i.key.as_str())).collect())
+            let keys: std::collections::BTreeSet<&str> =
+                events.iter().map(|e| e.key.as_str()).collect();
+            app.with_engine(|eng| {
+                eng.snapshot()
+                    .incidents
+                    .into_iter()
+                    .filter(|i| keys.contains(i.key.as_str()))
+                    .collect()
+            })
         };
         let counter = app.with_engine(|e| e.incident_counter());
         for ev in &events {
-            tracing::warn!(incident = ev.incident_id, kind = ev.kind.as_str(), title = ev.title, "incident");
+            tracing::warn!(
+                incident = ev.incident_id,
+                kind = ev.kind.as_str(),
+                title = ev.title,
+                "incident"
+            );
         }
         let _ = app
             .writer
@@ -80,7 +106,13 @@ pub async fn handle(app: &App, fx: Vec<Effect>) {
             .await;
     }
     for d in purge {
-        let r = app.writer.call(|reply| WriteCmd::Purge { device: d.clone(), reply }).await;
+        let r = app
+            .writer
+            .call(|reply| WriteCmd::Purge {
+                device: d.clone(),
+                reply,
+            })
+            .await;
         tracing::info!(device = d, result = ?r, "purged device data");
     }
 }

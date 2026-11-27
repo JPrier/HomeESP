@@ -79,7 +79,10 @@ pub struct Shared {
 
 impl Shared {
     pub fn snapshot(&self) -> Arc<EngineSnapshot> {
-        self.snapshot.read().map(|s| s.clone()).unwrap_or_else(|p| p.into_inner().clone())
+        self.snapshot
+            .read()
+            .map(|s| s.clone())
+            .unwrap_or_else(|p| p.into_inner().clone())
     }
 
     /// Apply an engine input without holding the lock across any await point.

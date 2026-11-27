@@ -63,18 +63,28 @@ fn skip_name(m: &[u8], mut p: usize) -> Option<usize> {
 
 /// Classify a response. Total over arbitrary input.
 pub fn classify(m: &[u8], id: u16, expect: Expect) -> Classified {
-    let bad = |e| Classified { rcode: 0, answer: "malformed", error: Some(e) };
-    let Some(rid) = rd16(m, 0) else { return bad("short") };
+    let bad = |e| Classified {
+        rcode: 0,
+        answer: "malformed",
+        error: Some(e),
+    };
+    let Some(rid) = rd16(m, 0) else {
+        return bad("short");
+    };
     if rid != id {
         return bad("id_mismatch");
     }
-    let (Some(f1), Some(f2)) = (m.get(2), m.get(3)) else { return bad("short") };
+    let (Some(f1), Some(f2)) = (m.get(2), m.get(3)) else {
+        return bad("short");
+    };
     if f1 & 0x80 == 0 {
         return bad("not_response");
     }
     let rcode = f2 & 0x0F;
     let tc = f1 & 0x02 != 0;
-    let (Some(qd), Some(an)) = (rd16(m, 4), rd16(m, 6)) else { return bad("short") };
+    let (Some(qd), Some(an)) = (rd16(m, 4), rd16(m, 6)) else {
+        return bad("short");
+    };
     let mut pos = 12usize;
     for _ in 0..qd {
         match skip_name(m, pos) {
@@ -82,30 +92,54 @@ pub fn classify(m: &[u8], id: u16, expect: Expect) -> Classified {
             _ => return bad("question"),
         }
     }
-    let mk = |answer| Classified { rcode, answer, error: None };
+    let mk = |answer| Classified {
+        rcode,
+        answer,
+        error: None,
+    };
     match rcode {
         0 => {}
         2 => return mk("servfail"),
-        3 => return mk(if expect == Expect::Nxdomain { "expected_nxdomain" } else { "unexpected_nxdomain" }),
+        3 => {
+            return mk(if expect == Expect::Nxdomain {
+                "expected_nxdomain"
+            } else {
+                "unexpected_nxdomain"
+            })
+        }
         5 => return mk("refused"),
         _ => return mk("malformed"),
     }
     if tc {
-        return Classified { rcode, answer: "no_answer", error: Some("truncated") };
+        return Classified {
+            rcode,
+            answer: "no_answer",
+            error: Some("truncated"),
+        };
     }
     if an == 0 {
-        return mk(if expect == Expect::Nxdomain { "mismatch" } else { "no_answer" });
+        return mk(if expect == Expect::Nxdomain {
+            "mismatch"
+        } else {
+            "no_answer"
+        });
     }
     if expect == Expect::Nxdomain {
         return mk("mismatch");
     }
     let mut matched = false;
     for _ in 0..an.min(32) {
-        let Some(p) = skip_name(m, pos) else { return bad("answer") };
-        let (Some(ty), Some(rdlen)) = (rd16(m, p), rd16(m, p + 8)) else { return bad("answer") };
+        let Some(p) = skip_name(m, pos) else {
+            return bad("answer");
+        };
+        let (Some(ty), Some(rdlen)) = (rd16(m, p), rd16(m, p + 8)) else {
+            return bad("answer");
+        };
         let start = p + 10;
         let end = start + usize::from(rdlen);
-        let Some(rdata) = m.get(start..end) else { return bad("rdata") };
+        let Some(rdata) = m.get(start..end) else {
+            return bad("rdata");
+        };
         if let Expect::Ipv4(ip) = expect {
             if ty == 1 && rdata == ip {
                 matched = true;
@@ -128,10 +162,22 @@ pub enum DnsOutcome {
 }
 
 /// One UDP DNS transaction: exactly one query, no retries (no retry storms).
-pub async fn query_udp(server: SocketAddr, qname: &str, qtype: u16, expect: Expect, timeout: Duration) -> DnsOutcome {
+pub async fn query_udp(
+    server: SocketAddr,
+    qname: &str,
+    qtype: u16,
+    expect: Expect,
+    timeout: Duration,
+) -> DnsOutcome {
     let id: u16 = rand::random();
-    let Some(q) = build_query(id, qname, qtype) else { return DnsOutcome::Error("invalid qname".into()) };
-    let bind: SocketAddr = if server.is_ipv4() { ([0, 0, 0, 0], 0).into() } else { ([0u16; 8], 0).into() };
+    let Some(q) = build_query(id, qname, qtype) else {
+        return DnsOutcome::Error("invalid qname".into());
+    };
+    let bind: SocketAddr = if server.is_ipv4() {
+        ([0, 0, 0, 0], 0).into()
+    } else {
+        ([0u16; 8], 0).into()
+    };
     let sock = match UdpSocket::bind(bind).await {
         Ok(s) => s,
         Err(e) => return DnsOutcome::Error(e.to_string()),
@@ -155,16 +201,27 @@ pub async fn query_udp(server: SocketAddr, qname: &str, qtype: u16, expect: Expe
                 if r.error == Some("id_mismatch") {
                     continue; // stray datagram; keep waiting until the deadline
                 }
-                return DnsOutcome::Answered { rtt: start.elapsed(), result: r };
+                return DnsOutcome::Answered {
+                    rtt: start.elapsed(),
+                    result: r,
+                };
             }
         }
     }
 }
 
 /// One TCP DNS transaction (RFC 7766 length-prefixed).
-pub async fn query_tcp(server: SocketAddr, qname: &str, qtype: u16, expect: Expect, timeout: Duration) -> DnsOutcome {
+pub async fn query_tcp(
+    server: SocketAddr,
+    qname: &str,
+    qtype: u16,
+    expect: Expect,
+    timeout: Duration,
+) -> DnsOutcome {
     let id: u16 = rand::random();
-    let Some(q) = build_query(id, qname, qtype) else { return DnsOutcome::Error("invalid qname".into()) };
+    let Some(q) = build_query(id, qname, qtype) else {
+        return DnsOutcome::Error("invalid qname".into());
+    };
     let start = Instant::now();
     let fut = async {
         let mut s = TcpStream::connect(server).await?;
@@ -181,12 +238,15 @@ pub async fn query_tcp(server: SocketAddr, qname: &str, qtype: u16, expect: Expe
     match tokio::time::timeout(timeout, fut).await {
         Err(_) => DnsOutcome::Timeout,
         Ok(Err(e)) => DnsOutcome::Error(e.to_string()),
-        Ok(Ok(buf)) => DnsOutcome::Answered { rtt: start.elapsed(), result: classify(&buf, id, expect) },
+        Ok(Ok(buf)) => DnsOutcome::Answered {
+            rtt: start.elapsed(),
+            result: classify(&buf, id, expect),
+        },
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -207,15 +267,42 @@ mod tests {
         let q = build_query(7, "router.home.arpa", 1).unwrap();
         assert_eq!(q.len(), 12 + 18 + 4);
         let ok = response(&q, 0, &[[192, 0, 2, 10]]);
-        assert_eq!(classify(&ok, 7, Expect::Ipv4([192, 0, 2, 10])).answer, "match");
-        assert_eq!(classify(&ok, 7, Expect::Ipv4([192, 0, 2, 11])).answer, "mismatch");
-        assert_eq!(classify(&ok, 8, Expect::AnyAnswer).error, Some("id_mismatch"));
-        assert_eq!(classify(&response(&q, 3, &[]), 7, Expect::Nxdomain).answer, "expected_nxdomain");
-        assert_eq!(classify(&response(&q, 3, &[]), 7, Expect::AnyAnswer).answer, "unexpected_nxdomain");
-        assert_eq!(classify(&response(&q, 2, &[]), 7, Expect::AnyAnswer).answer, "servfail");
-        assert_eq!(classify(&response(&q, 5, &[]), 7, Expect::AnyAnswer).answer, "refused");
-        assert_eq!(classify(&response(&q, 0, &[]), 7, Expect::AnyAnswer).answer, "no_answer");
-        assert_eq!(classify(&ok[..ok.len() - 2], 7, Expect::Ipv4([192, 0, 2, 10])).answer, "malformed");
+        assert_eq!(
+            classify(&ok, 7, Expect::Ipv4([192, 0, 2, 10])).answer,
+            "match"
+        );
+        assert_eq!(
+            classify(&ok, 7, Expect::Ipv4([192, 0, 2, 11])).answer,
+            "mismatch"
+        );
+        assert_eq!(
+            classify(&ok, 8, Expect::AnyAnswer).error,
+            Some("id_mismatch")
+        );
+        assert_eq!(
+            classify(&response(&q, 3, &[]), 7, Expect::Nxdomain).answer,
+            "expected_nxdomain"
+        );
+        assert_eq!(
+            classify(&response(&q, 3, &[]), 7, Expect::AnyAnswer).answer,
+            "unexpected_nxdomain"
+        );
+        assert_eq!(
+            classify(&response(&q, 2, &[]), 7, Expect::AnyAnswer).answer,
+            "servfail"
+        );
+        assert_eq!(
+            classify(&response(&q, 5, &[]), 7, Expect::AnyAnswer).answer,
+            "refused"
+        );
+        assert_eq!(
+            classify(&response(&q, 0, &[]), 7, Expect::AnyAnswer).answer,
+            "no_answer"
+        );
+        assert_eq!(
+            classify(&ok[..ok.len() - 2], 7, Expect::Ipv4([192, 0, 2, 10])).answer,
+            "malformed"
+        );
         assert!(build_query(1, "bad..name", 1).is_none());
     }
 
@@ -248,14 +335,28 @@ mod tests {
             let r = response(&buf[..n], 0, &[[192, 0, 2, 10]]);
             srv.send_to(&r, from).await.unwrap();
         });
-        let out = query_udp(addr, "router.home.arpa", 1, Expect::Ipv4([192, 0, 2, 10]), Duration::from_secs(1)).await;
+        let out = query_udp(
+            addr,
+            "router.home.arpa",
+            1,
+            Expect::Ipv4([192, 0, 2, 10]),
+            Duration::from_secs(1),
+        )
+        .await;
         match out {
             DnsOutcome::Answered { result, .. } => assert_eq!(result.answer, "match"),
             other => panic!("{other:?}"),
         }
         // Nobody answers -> timeout, not success.
         let dead = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let out = query_udp(dead.local_addr().unwrap(), "a.b", 1, Expect::AnyAnswer, Duration::from_millis(100)).await;
+        let out = query_udp(
+            dead.local_addr().unwrap(),
+            "a.b",
+            1,
+            Expect::AnyAnswer,
+            Duration::from_millis(100),
+        )
+        .await;
         assert_eq!(out, DnsOutcome::Timeout);
     }
 }

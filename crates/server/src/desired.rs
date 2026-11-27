@@ -31,7 +31,11 @@ struct Target {
 fn targets_for(cfg: &SiteConfig, node: &NodeConf) -> Vec<Target> {
     let prof = cfg.profile_for(node);
     let mut out: Vec<Target> = Vec::new();
-    for t in cfg.probe_targets.iter().filter(|t| t.nodes.is_empty() || t.nodes.contains(&node.id)) {
+    for t in cfg
+        .probe_targets
+        .iter()
+        .filter(|t| t.nodes.is_empty() || t.nodes.contains(&node.id))
+    {
         if t.kind == ProbeKindConf::Http {
             continue; // nodes do not run HTTP probes
         }
@@ -51,9 +55,13 @@ fn targets_for(cfg: &SiteConfig, node: &NodeConf) -> Vec<Target> {
         };
         let (expect, expect_ip) = match &t.expect {
             Some(DnsExpectConf::Nxdomain) => (p::DnsExpect::Nxdomain, [0; 4]),
-            Some(DnsExpectConf::Ipv4 { address }) => {
-                (p::DnsExpect::Ipv4, address.parse::<std::net::Ipv4Addr>().map(|a| a.octets()).unwrap_or([0; 4]))
-            }
+            Some(DnsExpectConf::Ipv4 { address }) => (
+                p::DnsExpect::Ipv4,
+                address
+                    .parse::<std::net::Ipv4Addr>()
+                    .map(|a| a.octets())
+                    .unwrap_or([0; 4]),
+            ),
             _ => (p::DnsExpect::AnyAnswer, [0; 4]),
         };
         out.push(Target {
@@ -66,15 +74,32 @@ fn targets_for(cfg: &SiteConfig, node: &NodeConf) -> Vec<Target> {
             timeout_ms: t.timeout_ms.unwrap_or(prof.probe_timeout_ms),
             expect,
             expect_ip,
-            qtype: t.qtype.unwrap_or(if t.kind == ProbeKindConf::Dns { 1 } else { 0 }),
+            qtype: t
+                .qtype
+                .unwrap_or(if t.kind == ProbeKindConf::Dns { 1 } else { 0 }),
             qname: t.qname.clone().unwrap_or_default(),
         });
     }
     // Baseline probes always present unless the operator configured the same ids.
     let builtin = [
-        ("gw-icmp", p::ProbeKind::Icmp, p::AddrSource::Gateway, prof.gateway_probe_ms),
-        ("server-icmp", p::ProbeKind::Icmp, p::AddrSource::Server, prof.server_probe_ms),
-        ("server-udp", p::ProbeKind::UdpEcho, p::AddrSource::Server, prof.udp_probe_ms),
+        (
+            "gw-icmp",
+            p::ProbeKind::Icmp,
+            p::AddrSource::Gateway,
+            prof.gateway_probe_ms,
+        ),
+        (
+            "server-icmp",
+            p::ProbeKind::Icmp,
+            p::AddrSource::Server,
+            prof.server_probe_ms,
+        ),
+        (
+            "server-udp",
+            p::ProbeKind::UdpEcho,
+            p::AddrSource::Server,
+            prof.udp_probe_ms,
+        ),
     ];
     for (id, k, src, interval) in builtin {
         if interval == 0 || out.iter().any(|t| t.id == id) || out.len() >= 8 {
@@ -102,7 +127,12 @@ fn targets_for(cfg: &SiteConfig, node: &NodeConf) -> Vec<Target> {
 }
 
 /// Encode the desired-config frame for `node` at `revision`.
-pub fn desired_frame(cfg: &SiteConfig, node: &NodeConf, revision: u64, seq: u64) -> Result<Vec<u8>, String> {
+pub fn desired_frame(
+    cfg: &SiteConfig,
+    node: &NodeConf,
+    revision: u64,
+    seq: u64,
+) -> Result<Vec<u8>, String> {
     let prof = cfg.profile_for(node);
     let mut flags = 0u16;
     if prof.passive_scan_enabled {
@@ -118,7 +148,11 @@ pub fn desired_frame(cfg: &SiteConfig, node: &NodeConf, revision: u64, seq: u64)
         revision,
         report_ms: prof.report_ms,
         wifi_link_ms: prof.wifi_link_ms,
-        ap_scan_ms: if prof.passive_scan_enabled { prof.neighbor_scan_ms } else { 0 },
+        ap_scan_ms: if prof.passive_scan_enabled {
+            prof.neighbor_scan_ms
+        } else {
+            0
+        },
         heartbeat_ms: prof.heartbeat_ms,
         health_ms: prof.health_ms,
         egress_bytes_per_sec: prof.egress_bytes_per_sec,
@@ -130,7 +164,12 @@ pub fn desired_frame(cfg: &SiteConfig, node: &NodeConf, revision: u64, seq: u64)
         scan_max_dwell_ms: prof.scan_max_dwell_ms,
     };
     let targets = targets_for(cfg, node);
-    let bssids: Vec<[u8; 6]> = cfg.radios.iter().filter_map(|r| parse_mac(&r.bssid)).take(16).collect();
+    let bssids: Vec<[u8; 6]> = cfg
+        .radios
+        .iter()
+        .filter_map(|r| parse_mac(&r.bssid))
+        .take(16)
+        .collect();
     let header = p::Header {
         kind: p::MsgKind::ConfigDesired,
         flags: 0,
@@ -141,8 +180,10 @@ pub fn desired_frame(cfg: &SiteConfig, node: &NodeConf, revision: u64, seq: u64)
         config_revision: revision,
     };
     let mut buf = [0u8; p::MAX_FRAME_BYTES];
-    let mut w = p::FrameWriter::new(&mut buf, &header, p::MAX_FRAME_BYTES).map_err(|e| format!("{e:?}"))?;
-    w.push(&p::Record::ConfigParams(params)).map_err(|e| format!("{e:?}"))?;
+    let mut w =
+        p::FrameWriter::new(&mut buf, &header, p::MAX_FRAME_BYTES).map_err(|e| format!("{e:?}"))?;
+    w.push(&p::Record::ConfigParams(params))
+        .map_err(|e| format!("{e:?}"))?;
     for t in &targets {
         w.push(&p::Record::ProbeTarget(p::ProbeTarget {
             id: &t.id,
@@ -161,7 +202,8 @@ pub fn desired_frame(cfg: &SiteConfig, node: &NodeConf, revision: u64, seq: u64)
         .map_err(|e| format!("target {}: {e:?}", t.id))?;
     }
     for b in &bssids {
-        w.push(&p::Record::TrackedBssid(*b)).map_err(|e| format!("{e:?}"))?;
+        w.push(&p::Record::TrackedBssid(*b))
+            .map_err(|e| format!("{e:?}"))?;
     }
     let n = w.finish();
     Ok(buf.get(..n).unwrap_or(&[]).to_vec())
@@ -180,7 +222,11 @@ pub fn ack_frame(node: &str, boot: [u8; 16], seq: u64, server_seq: u64) -> Resul
     };
     let mut buf = [0u8; 128];
     let mut w = p::FrameWriter::new(&mut buf, &header, 128).map_err(|e| format!("{e:?}"))?;
-    w.push(&p::Record::Ack(p::Ack { boot_id: boot, sequence: seq })).map_err(|e| format!("{e:?}"))?;
+    w.push(&p::Record::Ack(p::Ack {
+        boot_id: boot,
+        sequence: seq,
+    }))
+    .map_err(|e| format!("{e:?}"))?;
     let n = w.finish();
     Ok(buf.get(..n).unwrap_or(&[]).to_vec())
 }
@@ -211,9 +257,18 @@ probe_targets:
         let recs: Vec<_> = d.records().collect();
         let ids: Vec<&str> = recs
             .iter()
-            .filter_map(|r| if let p::Record::ProbeTarget(t) = r { Some(t.id) } else { None })
+            .filter_map(|r| {
+                if let p::Record::ProbeTarget(t) = r {
+                    Some(t.id)
+                } else {
+                    None
+                }
+            })
             .collect();
-        assert_eq!(ids, vec!["server-udp", "server-icmp", "gw-icmp", "dns-local"]);
+        assert_eq!(
+            ids,
+            vec!["server-udp", "server-icmp", "gw-icmp", "dns-local"]
+        );
         assert!(recs.iter().any(|r| matches!(r, p::Record::TrackedBssid(_))));
         match recs[0] {
             p::Record::ConfigParams(c) => {
@@ -228,6 +283,8 @@ probe_targets:
     fn ack_frame_decodes() {
         let f = ack_frame("node-01", [3; 16], 42, 1).unwrap();
         let d = p::decode_frame(&f).unwrap();
-        assert!(matches!(d.records().next(), Some(p::Record::Ack(a)) if a.sequence == 42 && a.boot_id == [3; 16]));
+        assert!(
+            matches!(d.records().next(), Some(p::Record::Ack(a)) if a.sequence == 42 && a.boot_id == [3; 16])
+        );
     }
 }

@@ -33,7 +33,9 @@ pub fn bucket_bounds() -> &'static [u32] {
 
 impl Default for LogHistogram {
     fn default() -> Self {
-        Self { counts: vec![0; bucket_bounds().len()] }
+        Self {
+            counts: vec![0; bucket_bounds().len()],
+        }
     }
 }
 
@@ -109,12 +111,30 @@ pub struct ProbeWindow {
 
 impl ProbeWindow {
     pub fn new(window_ms: i64) -> Self {
-        Self { window_ms, max_samples: 4096, gap_ms: 30_000, samples: VecDeque::new(), overlaps: VecDeque::new() }
+        Self {
+            window_ms,
+            max_samples: 4096,
+            gap_ms: 30_000,
+            samples: VecDeque::new(),
+            overlaps: VecDeque::new(),
+        }
     }
 
     /// Insert keeping time order (late samples are placed correctly).
-    pub fn push(&mut self, t: UnixMs, outcome: Outcome, rtt_us: Option<u32>, dns_good: Option<bool>, overlap: bool) {
-        let s = Sample { t, outcome, rtt_us, dns_good };
+    pub fn push(
+        &mut self,
+        t: UnixMs,
+        outcome: Outcome,
+        rtt_us: Option<u32>,
+        dns_good: Option<bool>,
+        overlap: bool,
+    ) {
+        let s = Sample {
+            t,
+            outcome,
+            rtt_us,
+            dns_good,
+        };
         let pos = self.samples.partition_point(|x| x.t <= t);
         self.samples.insert(pos, s);
         if overlap {
@@ -144,13 +164,21 @@ impl ProbeWindow {
         if self.samples.len() < 3 {
             return None;
         }
-        let mut d: Vec<i64> = self.samples.iter().zip(self.samples.iter().skip(1)).map(|(a, b)| b.t - a.t).collect();
+        let mut d: Vec<i64> = self
+            .samples
+            .iter()
+            .zip(self.samples.iter().skip(1))
+            .map(|(a, b)| b.t - a.t)
+            .collect();
         d.sort_unstable();
         d.get(d.len() / 2).copied()
     }
 
     pub fn stats(&self) -> WindowStats {
-        let mut s = WindowStats { samples: self.samples.len() as u32, ..Default::default() };
+        let mut s = WindowStats {
+            samples: self.samples.len() as u32,
+            ..Default::default()
+        };
         let mut rtts: Vec<u32> = Vec::new();
         let mut jitter_sum = 0f64;
         let mut jitter_n = 0u32;
@@ -190,7 +218,9 @@ impl ProbeWindow {
         if !rtts.is_empty() {
             rtts.sort_unstable();
             let q = |p: f64| {
-                let idx = ((p * rtts.len() as f64).ceil() as usize).saturating_sub(1).min(rtts.len() - 1);
+                let idx = ((p * rtts.len() as f64).ceil() as usize)
+                    .saturating_sub(1)
+                    .min(rtts.len() - 1);
                 rtts.get(idx).map(|v| f64::from(*v) / 1000.0)
             };
             s.p50_ms = q(0.50);
@@ -219,7 +249,7 @@ pub fn median_mad(values: &[f64]) -> Option<(f64, f64)> {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
@@ -229,7 +259,17 @@ mod tests {
         let mut w = ProbeWindow::new(300_000);
         for i in 0..40i64 {
             let ok = i % 10 != 0;
-            w.push(i * 5000, if ok { Outcome::Success } else { Outcome::Timeout }, ok.then_some(2000 + (i as u32 % 3) * 1000), None, false);
+            w.push(
+                i * 5000,
+                if ok {
+                    Outcome::Success
+                } else {
+                    Outcome::Timeout
+                },
+                ok.then_some(2000 + (i as u32 % 3) * 1000),
+                None,
+                false,
+            );
         }
         w.push(41 * 5000, Outcome::SkippedDeferred, None, None, false);
         let s = w.stats();

@@ -10,7 +10,9 @@ pub struct Exposition {
 }
 
 fn escape(v: &str) -> String {
-    v.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+    v.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
 }
 
 impl Exposition {
@@ -44,7 +46,10 @@ impl Exposition {
         if labels.is_empty() {
             let _ = writeln!(self.out, "{name} {v}");
         } else {
-            let l: Vec<String> = labels.iter().map(|(k, val)| format!("{k}=\"{}\"", escape(val))).collect();
+            let l: Vec<String> = labels
+                .iter()
+                .map(|(k, val)| format!("{k}=\"{}\"", escape(val)))
+                .collect();
             let _ = writeln!(self.out, "{name}{{{}}} {v}", l.join(","));
         }
     }

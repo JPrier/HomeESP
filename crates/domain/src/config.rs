@@ -406,7 +406,11 @@ pub enum DeviceKind {
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum MatcherConf {
     /// Stable opt-in advertisement (iBeacon). Values are not secrets but are protected.
-    Ibeacon { uuid: String, major: u16, minor: u16 },
+    Ibeacon {
+        uuid: String,
+        major: u16,
+        minor: u16,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -722,7 +726,8 @@ pub enum ConfigError {
 impl SiteConfig {
     /// Parse YAML and validate. Returns the config only if it has no issues.
     pub fn from_yaml_str(s: &str) -> Result<Self, ConfigError> {
-        let cfg: SiteConfig = serde_yaml::from_str(s).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        let cfg: SiteConfig =
+            serde_yaml::from_str(s).map_err(|e| ConfigError::Parse(e.to_string()))?;
         let issues = cfg.validate();
         if issues.is_empty() {
             Ok(cfg)
@@ -757,7 +762,13 @@ impl SiteConfig {
     pub fn validate(&self) -> Vec<ConfigIssue> {
         let mut v = Issues::default();
         if self.schema_version != CONFIG_SCHEMA_VERSION {
-            v.push("schema_version", format!("unsupported version {} (expected {CONFIG_SCHEMA_VERSION})", self.schema_version));
+            v.push(
+                "schema_version",
+                format!(
+                    "unsupported version {} (expected {CONFIG_SCHEMA_VERSION})",
+                    self.schema_version
+                ),
+            );
         }
         self.validate_profiles(&mut v);
         self.validate_layout(&mut v);
@@ -790,19 +801,67 @@ impl SiteConfig {
                 }
             }
             if p.neighbor_scan_ms != 0 {
-                range(v, &at("neighbor_scan_ms"), p.neighbor_scan_ms, 30_000, 3_600_000);
+                range(
+                    v,
+                    &at("neighbor_scan_ms"),
+                    p.neighbor_scan_ms,
+                    30_000,
+                    3_600_000,
+                );
             }
-            range(v, &at("probe_timeout_ms"), u32::from(p.probe_timeout_ms), 100, 5000);
-            range(v, &at("egress_bytes_per_sec"), u32::from(p.egress_bytes_per_sec), 100, 4000);
+            range(
+                v,
+                &at("probe_timeout_ms"),
+                u32::from(p.probe_timeout_ms),
+                100,
+                5000,
+            );
+            range(
+                v,
+                &at("egress_bytes_per_sec"),
+                u32::from(p.egress_bytes_per_sec),
+                100,
+                4000,
+            );
             if p.egress_burst_bytes < p.egress_bytes_per_sec || p.egress_burst_bytes > 8000 {
-                v.push(at("egress_burst_bytes"), "must be >= egress_bytes_per_sec and <= 8000");
+                v.push(
+                    at("egress_burst_bytes"),
+                    "must be >= egress_bytes_per_sec and <= 8000",
+                );
             }
-            range(v, &at("max_publish_payload_bytes"), u32::from(p.max_publish_payload_bytes), 256, 1024);
-            range(v, &at("max_offline_buffer_bytes"), u32::from(p.max_offline_buffer_bytes), 0, 16_384);
-            range(v, &at("scan_max_dwell_ms"), u32::from(p.scan_max_dwell_ms), 50, 300);
-            range(v, &at("max_probe_inflight"), u32::from(p.max_probe_inflight), 1, 2);
+            range(
+                v,
+                &at("max_publish_payload_bytes"),
+                u32::from(p.max_publish_payload_bytes),
+                256,
+                1024,
+            );
+            range(
+                v,
+                &at("max_offline_buffer_bytes"),
+                u32::from(p.max_offline_buffer_bytes),
+                0,
+                16_384,
+            );
+            range(
+                v,
+                &at("scan_max_dwell_ms"),
+                u32::from(p.scan_max_dwell_ms),
+                50,
+                300,
+            );
+            range(
+                v,
+                &at("max_probe_inflight"),
+                u32::from(p.max_probe_inflight),
+                1,
+                2,
+            );
             if p.csi_enabled && !self.experimental.csi {
-                v.push(at("csi_enabled"), "CSI is experimental; enable experimental.csi explicitly");
+                v.push(
+                    at("csi_enabled"),
+                    "CSI is experimental; enable experimental.csi explicitly",
+                );
             }
         }
     }
@@ -812,7 +871,10 @@ impl SiteConfig {
         dupes(v, "floors", self.floors.iter().map(|f| f.id.as_str()));
         for f in &self.floors {
             if !(f.scale_m.is_finite() && f.scale_m > 0.0) {
-                v.push(format!("floors.{}.scale_m", f.id), "must be a positive finite number");
+                v.push(
+                    format!("floors.{}.scale_m", f.id),
+                    "must be a positive finite number",
+                );
             }
         }
         dupes(v, "rooms", self.rooms.iter().map(|r| r.id.as_str()));
@@ -820,7 +882,10 @@ impl SiteConfig {
         for r in &self.rooms {
             if let Some(f) = &r.floor {
                 if !floors.is_empty() && !floors.contains(f.as_str()) {
-                    v.push(format!("rooms.{}.floor", r.id), format!("unknown floor {f}"));
+                    v.push(
+                        format!("rooms.{}.floor", r.id),
+                        format!("unknown floor {f}"),
+                    );
                 }
             }
             if !r.polygon.is_empty() {
@@ -842,7 +907,10 @@ impl SiteConfig {
         dupes(v, "nodes", self.nodes.iter().map(|n| n.id.as_str()));
         for n in &self.nodes {
             if RESERVED_NODE_IDS.contains(&n.id.as_str()) {
-                v.push(format!("nodes.{}", n.id), "reserved for a service account (broker ACL patterns)");
+                v.push(
+                    format!("nodes.{}", n.id),
+                    "reserved for a service account (broker ACL patterns)",
+                );
             }
             if let Some(r) = &n.room {
                 if !rooms.contains(r.as_str()) {
@@ -850,7 +918,10 @@ impl SiteConfig {
                 }
             }
             if !self.profiles.contains_key(&n.profile) {
-                v.push(format!("nodes.{}.profile", n.id), format!("unknown profile {}", n.profile));
+                v.push(
+                    format!("nodes.{}.profile", n.id),
+                    format!("unknown profile {}", n.profile),
+                );
             }
             if let Some(p) = n.position {
                 if p.iter().any(|x| !x.is_finite()) {
@@ -859,7 +930,10 @@ impl SiteConfig {
             }
             if let Some(ap) = &n.expected_ap {
                 if self.asset(ap.as_str()).is_none() {
-                    v.push(format!("nodes.{}.expected_ap", n.id), format!("unknown asset {ap}"));
+                    v.push(
+                        format!("nodes.{}.expected_ap", n.id),
+                        format!("unknown asset {ap}"),
+                    );
                 }
             }
         }
@@ -871,29 +945,48 @@ impl SiteConfig {
         for a in &self.assets {
             for p in a.parents.iter().chain(&a.redundant_parents) {
                 if !ids.contains(p.as_str()) {
-                    v.push(format!("assets.{}.parents", a.id), format!("unknown asset {p}"));
+                    v.push(
+                        format!("assets.{}.parents", a.id),
+                        format!("unknown asset {p}"),
+                    );
                 }
                 if p == &a.id {
-                    v.push(format!("assets.{}.parents", a.id), "asset depends on itself");
+                    v.push(
+                        format!("assets.{}.parents", a.id),
+                        "asset depends on itself",
+                    );
                 }
             }
             if a.redundant_parents.len() == 1 {
-                v.push(format!("assets.{}.redundant_parents", a.id), "a redundant group needs at least 2 alternatives");
+                v.push(
+                    format!("assets.{}.redundant_parents", a.id),
+                    "a redundant group needs at least 2 alternatives",
+                );
             }
         }
         if let Some(cycle) = find_cycle(&self.assets) {
-            v.push("assets", format!("hard dependency cycle: {}", cycle.join(" -> ")));
+            v.push(
+                "assets",
+                format!("hard dependency cycle: {}", cycle.join(" -> ")),
+            );
         }
         dupes(v, "radios", self.radios.iter().map(|r| r.bssid.as_str()));
         for r in &self.radios {
             if parse_mac(&r.bssid).is_none() {
-                v.push(format!("radios.{}", r.bssid), "bssid must be aa:bb:cc:dd:ee:ff");
+                v.push(
+                    format!("radios.{}", r.bssid),
+                    "bssid must be aa:bb:cc:dd:ee:ff",
+                );
             }
             match self.asset(r.ap.as_str()) {
-                None => v.push(format!("radios.{}.ap", r.bssid), format!("unknown asset {}", r.ap)),
-                Some(a) if a.kind != AssetKind::AccessPoint => {
-                    v.push(format!("radios.{}.ap", r.bssid), "radio must belong to an access_point asset")
-                }
+                None => v.push(
+                    format!("radios.{}.ap", r.bssid),
+                    format!("unknown asset {}", r.ap),
+                ),
+                Some(a) if a.kind != AssetKind::AccessPoint => v.push(
+                    format!("radios.{}.ap", r.bssid),
+                    "radio must belong to an access_point asset",
+                ),
                 Some(_) => {}
             }
         }
@@ -903,7 +996,10 @@ impl SiteConfig {
         dupes(
             v,
             "probe_targets/central_checks",
-            self.probe_targets.iter().map(|t| t.id.as_str()).chain(self.central_checks.iter().map(|c| c.id.as_str())),
+            self.probe_targets
+                .iter()
+                .map(|t| t.id.as_str())
+                .chain(self.central_checks.iter().map(|c| c.id.as_str())),
         );
         if self.probe_targets.len() > 8 {
             v.push("probe_targets", "nodes support at most 8 probe targets");
@@ -938,8 +1034,13 @@ impl SiteConfig {
                         }
                     }
                 }
-                ProbeKindConf::Tcp if t.port.is_none() => v.push(at("port"), "TCP probes need a port"),
-                ProbeKindConf::Http => v.push(at("kind"), "HTTP probes are central-only (nodes report unsupported)"),
+                ProbeKindConf::Tcp if t.port.is_none() => {
+                    v.push(at("port"), "TCP probes need a port")
+                }
+                ProbeKindConf::Http => v.push(
+                    at("kind"),
+                    "HTTP probes are central-only (nodes report unsupported)",
+                ),
                 _ => {}
             }
             if let Some(a) = &t.asset {
@@ -960,18 +1061,24 @@ impl SiteConfig {
             if c.timeout_ms >= c.interval_ms {
                 v.push(at("timeout_ms"), "must be < interval_ms");
             }
-            if c.host.is_empty() || c.host.len() > 253 || c.host.contains(['/', '@', ' ', '?', '#']) {
+            if c.host.is_empty() || c.host.len() > 253 || c.host.contains(['/', '@', ' ', '?', '#'])
+            {
                 v.push(at("host"), "must be a bare hostname or IP (no URL parts)");
             }
             match c.kind {
                 ProbeKindConf::Dns if !c.qname.as_deref().is_some_and(valid_qname) => {
                     v.push(at("qname"), "DNS checks need a valid qname")
                 }
-                ProbeKindConf::Tcp if c.port.is_none() => v.push(at("port"), "TCP checks need a port"),
+                ProbeKindConf::Tcp if c.port.is_none() => {
+                    v.push(at("port"), "TCP checks need a port")
+                }
                 ProbeKindConf::Http => {
                     if let Some(p) = &c.path {
                         if !p.starts_with('/') || p.contains("://") || p.len() > 256 {
-                            v.push(at("path"), "must be an absolute path on the configured host");
+                            v.push(
+                                at("path"),
+                                "must be an absolute path on the configured host",
+                            );
                         }
                     }
                 }
@@ -995,19 +1102,35 @@ impl SiteConfig {
             match &d.matcher {
                 MatcherConf::Ibeacon { uuid, .. } => {
                     if !valid_uuid(uuid) {
-                        v.push(format!("devices.{}.matcher.uuid", d.id), "must be a canonical 36-char UUID");
+                        v.push(
+                            format!("devices.{}.matcher.uuid", d.id),
+                            "must be a canonical 36-char UUID",
+                        );
                     }
                 }
             }
         }
         if self.privacy.unknown_ble_retention != "none" {
-            v.push("privacy.unknown_ble_retention", "only `none` is supported (unknown identifiers are never retained)");
+            v.push(
+                "privacy.unknown_ble_retention",
+                "only `none` is supported (unknown identifiers are never retained)",
+            );
         }
-        range(v, "privacy.location_history_days", self.privacy.location_history_days, 1, 90);
+        range(
+            v,
+            "privacy.location_history_days",
+            self.privacy.location_history_days,
+            1,
+            90,
+        );
     }
 
     fn validate_notifications(&self, v: &mut Issues) {
-        dupes(v, "notifications.notifiers", self.notifications.notifiers.iter().map(|n| n.id.as_str()));
+        dupes(
+            v,
+            "notifications.notifiers",
+            self.notifications.notifiers.iter().map(|n| n.id.as_str()),
+        );
         for n in &self.notifications.notifiers {
             let at = format!("notifications.notifiers.{}.url", n.id);
             if n.url.starts_with("https://") {
@@ -1016,11 +1139,22 @@ impl SiteConfig {
             if n.url.starts_with("http://") && n.allow_plain_http_lan {
                 continue;
             }
-            v.push(at, "must be https:// (or http:// with allow_plain_http_lan)");
+            v.push(
+                at,
+                "must be https:// (or http:// with allow_plain_http_lan)",
+            );
         }
         for (i, r) in self.notifications.routes.iter().enumerate() {
-            if !self.notifications.notifiers.iter().any(|n| n.id == r.notifier) {
-                v.push(format!("notifications.routes[{i}]"), format!("unknown notifier {}", r.notifier));
+            if !self
+                .notifications
+                .notifiers
+                .iter()
+                .any(|n| n.id == r.notifier)
+            {
+                v.push(
+                    format!("notifications.routes[{i}]"),
+                    format!("unknown notifier {}", r.notifier),
+                );
             }
         }
         if let Some(w) = &self.watchdog {
@@ -1036,7 +1170,13 @@ impl SiteConfig {
     fn validate_misc(&self, v: &mut Issues) {
         let r = &self.retention;
         range(v, "retention.raw_days", r.raw_days, 1, 90);
-        range(v, "retention.rollup_minute_days", r.rollup_minute_days, 1, 730);
+        range(
+            v,
+            "retention.rollup_minute_days",
+            r.rollup_minute_days,
+            1,
+            730,
+        );
         range(v, "retention.rollup_hour_days", r.rollup_hour_days, 1, 3650);
         if r.max_db_mb < 64 {
             v.push("retention.max_db_mb", "must be >= 64");
@@ -1046,31 +1186,45 @@ impl SiteConfig {
                 v.push(format!("maintenance[{i}]"), "end must be after start");
             }
             if self.asset(m.asset.as_str()).is_none() {
-                v.push(format!("maintenance[{i}].asset"), format!("unknown asset {}", m.asset));
+                v.push(
+                    format!("maintenance[{i}].asset"),
+                    format!("unknown asset {}", m.asset),
+                );
             }
         }
         let t = &self.thresholds;
         if t.critical_consecutive_failures == 0 || t.recovery_consecutive_successes == 0 {
             v.push("thresholds", "consecutive counts must be >= 1");
         }
-        if !(0.0..=100.0).contains(&t.loss_degraded_pct) || t.loss_critical_pct < t.loss_degraded_pct {
+        if !(0.0..=100.0).contains(&t.loss_degraded_pct)
+            || t.loss_critical_pct < t.loss_degraded_pct
+        {
             v.push("thresholds.loss_*", "0 <= degraded <= critical <= 100");
         }
         let l = &t.location;
         if !(0.5..=1.0).contains(&l.min_confidence) || !(0.0..=0.5).contains(&l.min_margin) {
-            v.push("thresholds.location", "min_confidence in [0.5,1], min_margin in [0,0.5]");
+            v.push(
+                "thresholds.location",
+                "min_confidence in [0.5,1], min_margin in [0,0.5]",
+            );
         }
         if !(0.0..=1.0).contains(&l.ema_alpha) || l.ema_alpha == 0.0 || l.sigma_db <= 0.0 {
             v.push("thresholds.location", "ema_alpha in (0,1], sigma_db > 0");
         }
         if let Some(o) = &self.integrations.opnsense {
             if !o.base_url.starts_with("https://") {
-                v.push("integrations.opnsense.base_url", "must be https:// (read-only API over TLS)");
+                v.push(
+                    "integrations.opnsense.base_url",
+                    "must be https:// (read-only API over TLS)",
+                );
             }
         }
         for s in &self.integrations.snmp {
             if s.community_file.is_some() && !s.allow_legacy_v2c {
-                v.push(format!("integrations.snmp.{}", s.asset), "SNMPv2c requires allow_legacy_v2c: true");
+                v.push(
+                    format!("integrations.snmp.{}", s.asset),
+                    "SNMPv2c requires allow_legacy_v2c: true",
+                );
             }
             if self.asset(s.asset.as_str()).is_none() {
                 v.push(format!("integrations.snmp.{}", s.asset), "unknown asset");
@@ -1084,7 +1238,10 @@ struct Issues(Vec<ConfigIssue>);
 
 impl Issues {
     fn push(&mut self, path: impl Into<String>, msg: impl Into<String>) {
-        self.0.push(ConfigIssue { path: path.into(), message: msg.into() });
+        self.0.push(ConfigIssue {
+            path: path.into(),
+            message: msg.into(),
+        });
     }
 }
 
@@ -1121,12 +1278,21 @@ pub fn parse_mac(s: &str) -> Option<[u8; 6]> {
 
 /// Format a MAC as lowercase colon-hex.
 pub fn format_mac(m: &[u8; 6]) -> String {
-    m.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(":")
+    m.iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 fn valid_uuid(s: &str) -> bool {
     s.len() == 36
-        && s.char_indices().all(|(i, c)| if [8, 13, 18, 23].contains(&i) { c == '-' } else { c.is_ascii_hexdigit() })
+        && s.char_indices().all(|(i, c)| {
+            if [8, 13, 18, 23].contains(&i) {
+                c == '-'
+            } else {
+                c.is_ascii_hexdigit()
+            }
+        })
 }
 
 /// DNS qname rule shared with the wire protocol (<= 63 bytes total).
@@ -1138,7 +1304,8 @@ pub fn valid_qname(s: &str) -> bool {
                 && l.len() <= 63
                 && !l.starts_with('-')
                 && !l.ends_with('-')
-                && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                && l.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         })
 }
 
@@ -1155,7 +1322,10 @@ pub fn validate_polygon(p: &[[f64; 2]]) -> Result<(), String> {
     }
     let n = p.len();
     let at = |i: usize| p.get(i % n).copied().unwrap_or([0.0, 0.0]);
-    let area: f64 = (0..n).map(|i| at(i)[0] * at(i + 1)[1] - at(i + 1)[0] * at(i)[1]).sum::<f64>() / 2.0;
+    let area: f64 = (0..n)
+        .map(|i| at(i)[0] * at(i + 1)[1] - at(i + 1)[0] * at(i)[1])
+        .sum::<f64>()
+        / 2.0;
     if area.abs() < 1e-9 {
         return Err("zero area".into());
     }
@@ -1177,15 +1347,27 @@ fn segments_intersect(a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2]) -> boo
     fn orient(p: [f64; 2], q: [f64; 2], r: [f64; 2]) -> f64 {
         (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
     }
-    let (o1, o2, o3, o4) = (orient(a, b, c), orient(a, b, d), orient(c, d, a), orient(c, d, b));
+    let (o1, o2, o3, o4) = (
+        orient(a, b, c),
+        orient(a, b, d),
+        orient(c, d, a),
+        orient(c, d, b),
+    );
     (o1 * o2 < 0.0) && (o3 * o4 < 0.0)
 }
 
 /// Find a cycle in hard (`parents`) dependencies. Redundant alternatives are modeled
 /// separately and not part of the hard DAG.
 pub fn find_cycle(assets: &[Asset]) -> Option<Vec<String>> {
-    let edges: HashMap<&str, Vec<&str>> =
-        assets.iter().map(|a| (a.id.as_str(), a.parents.iter().map(|p| p.as_str()).collect())).collect();
+    let edges: HashMap<&str, Vec<&str>> = assets
+        .iter()
+        .map(|a| {
+            (
+                a.id.as_str(),
+                a.parents.iter().map(|p| p.as_str()).collect(),
+            )
+        })
+        .collect();
     #[derive(Clone, Copy, PartialEq)]
     enum Mark {
         Temp,
@@ -1260,7 +1442,10 @@ probe_targets:
         let c = SiteConfig::from_yaml_str(SAMPLE).unwrap();
         assert_eq!(c.topic_prefix(), "observatory/v1/home");
         assert_eq!(c.profile_for(&c.nodes[0]).report_ms, 2000);
-        assert!(!c.privacy.location_enabled, "location must be off by default");
+        assert!(
+            !c.privacy.location_enabled,
+            "location must be off by default"
+        );
         assert!(!c.experimental.csi);
     }
 
@@ -1271,16 +1456,24 @@ probe_targets:
 
     #[test]
     fn detects_cycles_duplicates_bad_refs_and_polygons() {
-        let y = SAMPLE.replace("parents: [gateway]}", "parents: [gateway]}\n  - {id: gateway, kind: switch, parents: [ap-living]}");
+        let y = SAMPLE.replace(
+            "parents: [gateway]}",
+            "parents: [gateway]}\n  - {id: gateway, kind: switch, parents: [ap-living]}",
+        );
         let i = issues(&y);
-        assert!(i.iter().any(|x| x.message.contains("duplicate id gateway")), "{i:?}");
+        assert!(
+            i.iter().any(|x| x.message.contains("duplicate id gateway")),
+            "{i:?}"
+        );
         let y = SAMPLE.replace(
             "- {id: gateway, kind: router, critical: true, address: 192.0.2.1}",
             "- {id: gateway, kind: router, critical: true, parents: [ap-living]}",
         );
         assert!(issues(&y).iter().any(|x| x.message.contains("cycle")));
         let y = SAMPLE.replace("room: hall}", "room: kitchen}");
-        assert!(issues(&y).iter().any(|x| x.message.contains("unknown room kitchen")));
+        assert!(issues(&y)
+            .iter()
+            .any(|x| x.message.contains("unknown room kitchen")));
         let y = SAMPLE.replace("[[0,0],[5,0],[5,4],[0,4]]", "[[0,0],[5,4],[5,0],[0,4]]");
         assert!(issues(&y).iter().any(|x| x.path.contains("polygon")));
         let y = SAMPLE.replace("qname: router.home.arpa", "qname: bad..name");
@@ -1292,9 +1485,13 @@ probe_targets:
         let y = format!("{SAMPLE}profiles:\n  default: {{egress_bytes_per_sec: 50000}}\n");
         assert!(issues(&y).iter().any(|x| x.path.contains("egress")));
         let y = format!("{SAMPLE}profiles:\n  default: {{csi_enabled: true}}\n");
-        assert!(issues(&y).iter().any(|x| x.message.contains("experimental")));
+        assert!(issues(&y)
+            .iter()
+            .any(|x| x.message.contains("experimental")));
         assert!(serde_yaml::from_str::<SiteConfig>(&format!("{SAMPLE}bogus_field: 1\n")).is_err());
-        let y = format!("{SAMPLE}notifications:\n  notifiers: [{{id: n, kind: ntfy, url: 'http://x'}}]\n");
+        let y = format!(
+            "{SAMPLE}notifications:\n  notifiers: [{{id: n, kind: ntfy, url: 'http://x'}}]\n"
+        );
         assert!(issues(&y).iter().any(|x| x.message.contains("https")));
     }
 

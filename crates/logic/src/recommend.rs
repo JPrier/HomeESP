@@ -30,24 +30,58 @@ fn component(ts: &[&TargetSummary], f: impl Fn(&TargetSummary) -> Option<f64>) -
 /// Score in [0, 100] from loss, p95 latency and DNS availability. Each component
 /// must have >= `min_samples`; missing components lower coverage instead of the score.
 pub fn score(s: &EngineSnapshot, min_samples: u32) -> Score {
-    let usable: Vec<&TargetSummary> = s.targets.iter().filter(|t| t.stats.eligible >= min_samples).collect();
-    let ip: Vec<&TargetSummary> = usable.iter().copied().filter(|t| t.kind == "icmp" || t.kind == "udp_echo").collect();
+    let usable: Vec<&TargetSummary> = s
+        .targets
+        .iter()
+        .filter(|t| t.stats.eligible >= min_samples)
+        .collect();
+    let ip: Vec<&TargetSummary> = usable
+        .iter()
+        .copied()
+        .filter(|t| t.kind == "icmp" || t.kind == "udp_echo")
+        .collect();
     let dns: Vec<&TargetSummary> = usable.iter().copied().filter(|t| t.kind == "dns").collect();
-    let loss = component(&ip, |t| t.stats.loss_pct.map(|l| (100.0 - l * 10.0).clamp(0.0, 100.0)));
-    let lat = component(&ip, |t| t.stats.p95_ms.map(|p| (100.0 - (p - 10.0).max(0.0)).clamp(0.0, 100.0)));
-    let dns_av = component(&dns, |t| {
-        (t.stats.eligible > 0).then(|| 100.0 * f64::from(t.stats.successes.saturating_sub(t.stats.dns_bad)) / f64::from(t.stats.eligible))
+    let loss = component(&ip, |t| {
+        t.stats
+            .loss_pct
+            .map(|l| (100.0 - l * 10.0).clamp(0.0, 100.0))
     });
-    let comps = vec![("loss".to_string(), loss), ("latency_p95".to_string(), lat), ("dns".to_string(), dns_av)];
+    let lat = component(&ip, |t| {
+        t.stats
+            .p95_ms
+            .map(|p| (100.0 - (p - 10.0).max(0.0)).clamp(0.0, 100.0))
+    });
+    let dns_av = component(&dns, |t| {
+        (t.stats.eligible > 0).then(|| {
+            100.0 * f64::from(t.stats.successes.saturating_sub(t.stats.dns_bad))
+                / f64::from(t.stats.eligible)
+        })
+    });
+    let comps = vec![
+        ("loss".to_string(), loss),
+        ("latency_p95".to_string(), lat),
+        ("dns".to_string(), dns_av),
+    ];
     let present: Vec<f64> = comps.iter().filter_map(|c| c.1).collect();
     let coverage = present.len() as f64 / comps.len() as f64;
     let value = (coverage >= 2.0 / 3.0).then(|| present.iter().sum::<f64>() / present.len() as f64);
     let worst_vantage = usable
         .iter()
         .filter(|t| t.stats.p95_ms.is_some())
-        .max_by(|a, b| a.stats.p95_ms.unwrap_or(0.0).total_cmp(&b.stats.p95_ms.unwrap_or(0.0)))
+        .max_by(|a, b| {
+            a.stats
+                .p95_ms
+                .unwrap_or(0.0)
+                .total_cmp(&b.stats.p95_ms.unwrap_or(0.0))
+        })
         .map(|t| t.vantage.clone());
-    Score { version: SCORE_VERSION, value, coverage, components: comps, worst_vantage }
+    Score {
+        version: SCORE_VERSION,
+        value,
+        coverage,
+        components: comps,
+        worst_vantage,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -79,7 +113,11 @@ pub fn recommendations(s: &EngineSnapshot) -> Vec<Recommendation> {
             }
         }
         if let Some(sys) = &n.state.last_system {
-            if u32::from(sys.drops_overflow) + u32::from(sys.drops_budget) + u32::from(sys.drops_expired) > 0 {
+            if u32::from(sys.drops_overflow)
+                + u32::from(sys.drops_budget)
+                + u32::from(sys.drops_expired)
+                > 0
+            {
                 out.push(Recommendation {
                     id: format!("node-drops:{}", n.id),
                     title: format!("Node {} dropped telemetry", n.id),
@@ -89,7 +127,10 @@ pub fn recommendations(s: &EngineSnapshot) -> Vec<Recommendation> {
                         sys.drops_overflow, sys.drops_budget, sys.drops_expired
                     )],
                     expected_effect: "no silent gaps in history".into(),
-                    alternatives: vec!["raise egress budget slightly".into(), "lengthen report interval".into()],
+                    alternatives: vec![
+                        "raise egress budget slightly".into(),
+                        "lengthen report interval".into(),
+                    ],
                     verification: "drop counters stay flat for 24 h".into(),
                 });
             }
@@ -101,7 +142,11 @@ pub fn recommendations(s: &EngineSnapshot) -> Vec<Recommendation> {
             id: "channel-overlap".into(),
             title: "All nodes see their AP on the same 2.4 GHz channel".into(),
             confidence: "low".into(),
-            evidence: vec![format!("channel {} for {} nodes", channels[0], channels.len())],
+            evidence: vec![format!(
+                "channel {} for {} nodes",
+                channels[0],
+                channels.len()
+            )],
             expected_effect: "less co-channel contention if multiple APs share it".into(),
             alternatives: vec!["this is expected with a single AP".into()],
             verification: "review AP channel plan and neighbor channel counts in scans".into(),

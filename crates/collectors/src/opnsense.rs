@@ -23,21 +23,33 @@ pub struct GatewayStatus {
 fn parse_unit(v: &serde_json::Value) -> Option<f64> {
     // OPNsense reports values like "12.3 ms" / "0.0 %" / "~".
     let s = v.as_str()?;
-    let num: String = s.chars().take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-').collect();
+    let num: String = s
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+        .collect();
     num.parse().ok()
 }
 
 /// Parse `/api/routes/gateway/status`.
 pub fn parse_gateways(body: &str) -> Result<Vec<GatewayStatus>, String> {
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
-    let items = v.get("items").and_then(|i| i.as_array()).ok_or("missing items")?;
+    let items = v
+        .get("items")
+        .and_then(|i| i.as_array())
+        .ok_or("missing items")?;
     Ok(items
         .iter()
         .take(64)
         .filter_map(|it| {
             Some(GatewayStatus {
                 name: it.get("name")?.as_str()?.chars().take(64).collect(),
-                status: it.get("status").and_then(|s| s.as_str()).unwrap_or("unknown").chars().take(32).collect(),
+                status: it
+                    .get("status")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or("unknown")
+                    .chars()
+                    .take(32)
+                    .collect(),
                 delay_ms: it.get("delay").and_then(parse_unit),
                 stddev_ms: it.get("stddev").and_then(parse_unit),
                 loss_pct: it.get("loss").and_then(parse_unit),
@@ -64,14 +76,18 @@ pub fn parse_unbound(body: &str) -> Result<UnboundStats, String> {
         for k in p {
             cur = cur.get(*k)?;
         }
-        cur.as_str().and_then(|s| s.parse().ok()).or_else(|| cur.as_u64())
+        cur.as_str()
+            .and_then(|s| s.parse().ok())
+            .or_else(|| cur.as_u64())
     };
     let f = |p: &[&str]| -> Option<f64> {
         let mut cur = d;
         for k in p {
             cur = cur.get(*k)?;
         }
-        cur.as_str().and_then(|s| s.parse().ok()).or_else(|| cur.as_f64())
+        cur.as_str()
+            .and_then(|s| s.parse().ok())
+            .or_else(|| cur.as_f64())
     };
     Ok(UnboundStats {
         queries: n(&["total", "num", "queries"]),
@@ -101,7 +117,12 @@ pub struct OpnsenseClient {
 }
 
 impl OpnsenseClient {
-    pub fn new(base_url: &str, key: String, secret: String, timeout: Duration) -> Result<Self, String> {
+    pub fn new(
+        base_url: &str,
+        key: String,
+        secret: String,
+        timeout: Duration,
+    ) -> Result<Self, String> {
         if !base_url.starts_with("https://") {
             return Err("OPNsense base_url must be https".into());
         }
@@ -110,7 +131,12 @@ impl OpnsenseClient {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| e.to_string())?;
-        Ok(Self { base: base_url.trim_end_matches('/').into(), key, secret, http })
+        Ok(Self {
+            base: base_url.trim_end_matches('/').into(),
+            key,
+            secret,
+            http,
+        })
     }
 
     async fn get(&self, path: &str) -> Result<String, FetchError> {
@@ -127,7 +153,10 @@ impl OpnsenseClient {
             404 => return Err(FetchError::NotAvailable),
             s => return Err(FetchError::Transport(format!("HTTP {s}"))),
         }
-        let bytes = r.bytes().await.map_err(|e| FetchError::Transport(e.to_string()))?;
+        let bytes = r
+            .bytes()
+            .await
+            .map_err(|e| FetchError::Transport(e.to_string()))?;
         if bytes.len() > 1_000_000 {
             return Err(FetchError::Parse("response too large".into()));
         }
@@ -144,7 +173,7 @@ impl OpnsenseClient {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -173,6 +202,12 @@ mod tests {
 
     #[test]
     fn refuses_plain_http() {
-        assert!(OpnsenseClient::new("http://router", String::new(), String::new(), Duration::from_secs(1)).is_err());
+        assert!(OpnsenseClient::new(
+            "http://router",
+            String::new(),
+            String::new(),
+            Duration::from_secs(1)
+        )
+        .is_err());
     }
 }

@@ -26,7 +26,14 @@ fn mac(key: &[u8], body: &[u8]) -> Option<[u8; MAC_LEN]> {
 }
 
 /// Build a request or response (also used by tests and the simulator).
-pub fn build(response: bool, node: &str, seq: u32, nonce: u32, mono: u32, key: &[u8]) -> Option<Vec<u8>> {
+pub fn build(
+    response: bool,
+    node: &str,
+    seq: u32,
+    nonce: u32,
+    mono: u32,
+    key: &[u8],
+) -> Option<Vec<u8>> {
     let n = node.len();
     if n == 0 || n > 32 {
         return None;
@@ -98,13 +105,20 @@ impl Window {
         if back >= REPLAY_WINDOW {
             // Far below the window: only a rebooted node (sequence restarted) after a
             // quiet period is accepted; a replay of old traffic is not.
-            return self.last_accept.is_some_and(|t| now.saturating_duration_since(t) >= REBOOT_QUIET);
+            return self
+                .last_accept
+                .is_some_and(|t| now.saturating_duration_since(t) >= REBOOT_QUIET);
         }
         self.bits & (1u64 << back) == 0
     }
     fn accept(&mut self, seq: u32, now: Instant) {
         if !self.started || (seq < self.high && self.high - seq >= REPLAY_WINDOW) {
-            *self = Window { high: seq, bits: 1, last_accept: Some(now), started: true };
+            *self = Window {
+                high: seq,
+                bits: 1,
+                last_accept: Some(now),
+                started: true,
+            };
             return;
         }
         if seq > self.high {
@@ -131,7 +145,15 @@ pub struct EchoResponder {
 
 impl EchoResponder {
     pub fn new(keys: HashMap<String, Vec<u8>>, rate_per_s: f64, burst: f64) -> Self {
-        Self { keys, windows: HashMap::new(), buckets: HashMap::new(), rate_per_s, burst, served: 0, rejected: HashMap::new() }
+        Self {
+            keys,
+            windows: HashMap::new(),
+            buckets: HashMap::new(),
+            rate_per_s,
+            burst,
+            served: 0,
+            rejected: HashMap::new(),
+        }
     }
 
     /// Validate a request and produce the response bytes (same length) or a rejection.
@@ -155,13 +177,20 @@ impl EchoResponder {
         if req.len() != 4 + n + 12 + MAC_LEN {
             return Err(Reject::Format);
         }
-        let node = std::str::from_utf8(req.get(4..4 + n).ok_or(Reject::Format)?).map_err(|_| Reject::Format)?;
+        let node = std::str::from_utf8(req.get(4..4 + n).ok_or(Reject::Format)?)
+            .map_err(|_| Reject::Format)?;
         let key = self.keys.get(node).ok_or(Reject::UnknownNode)?;
         let body = req.get(..4 + n + 12).ok_or(Reject::Format)?;
         let got = req.get(4 + n + 12..).ok_or(Reject::Format)?;
         let want = mac(key, body).ok_or(Reject::BadMac)?;
         // Constant-time compare.
-        if got.len() != MAC_LEN || got.iter().zip(want.iter()).fold(0u8, |a, (x, y)| a | (x ^ y)) != 0 {
+        if got.len() != MAC_LEN
+            || got
+                .iter()
+                .zip(want.iter())
+                .fold(0u8, |a, (x, y)| a | (x ^ y))
+                != 0
+        {
             return Err(Reject::BadMac);
         }
         let rd = |at: usize| -> Result<u32, Reject> {
@@ -176,7 +205,10 @@ impl EchoResponder {
             return Err(Reject::Replay);
         }
         // 2. Rate limit per authenticated node; only fresh requests consume tokens.
-        let b = self.buckets.entry(node.clone()).or_insert(Bucket { tokens: self.burst, last: now });
+        let b = self.buckets.entry(node.clone()).or_insert(Bucket {
+            tokens: self.burst,
+            last: now,
+        });
         let dt = now.saturating_duration_since(b.last).as_secs_f64();
         b.tokens = (b.tokens + dt * self.rate_per_s).min(self.burst);
         b.last = now;
@@ -193,7 +225,11 @@ impl EchoResponder {
 }
 
 /// Run the responder on a bound socket until cancelled.
-pub async fn serve(sock: tokio::net::UdpSocket, mut r: EchoResponder, stats: std::sync::Arc<std::sync::Mutex<(u64, u64)>>) {
+pub async fn serve(
+    sock: tokio::net::UdpSocket,
+    mut r: EchoResponder,
+    stats: std::sync::Arc<std::sync::Mutex<(u64, u64)>>,
+) {
     let mut buf = [0u8; 512];
     loop {
         let (n, from): (usize, SocketAddr) = match sock.recv_from(&mut buf).await {
@@ -221,7 +257,7 @@ pub async fn serve(sock: tokio::net::UdpSocket, mut r: EchoResponder, stats: std
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -229,10 +265,17 @@ mod tests {
 
     #[test]
     fn matches_firmware_golden_vector() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/golden/protocol/udp_echo_request.hex");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/golden/protocol/udp_echo_request.hex"
+        );
         let want = std::fs::read_to_string(path).unwrap();
         let got = build(false, "node-01", 7, 0xdead_beef, 123_456, KEY).unwrap();
-        assert_eq!(hex::encode(got), want.trim(), "Rust and C++ echo encodings must agree");
+        assert_eq!(
+            hex::encode(got),
+            want.trim(),
+            "Rust and C++ echo encodings must agree"
+        );
     }
 
     #[test]
@@ -262,19 +305,25 @@ mod tests {
         let first = build(false, "n", 1, 1, 0, KEY).unwrap();
         assert!(r.handle(&first, t0).is_ok());
         for s in 2..200u32 {
-            assert!(r.handle(&build(false, "n", s, s, 0, KEY).unwrap(), t0).is_ok());
+            assert!(r
+                .handle(&build(false, "n", s, s, 0, KEY).unwrap(), t0)
+                .is_ok());
         }
         // Old request pushed far out of the window: still a replay while the node is active.
         assert_eq!(r.handle(&first, t0), Err(Reject::Replay));
         // Out-of-order but within the window and unseen: accepted once.
         let mut r2 = EchoResponder::new([("n".to_string(), KEY.to_vec())].into(), 1000.0, 1000.0);
-        assert!(r2.handle(&build(false, "n", 10, 1, 0, KEY).unwrap(), t0).is_ok());
+        assert!(r2
+            .handle(&build(false, "n", 10, 1, 0, KEY).unwrap(), t0)
+            .is_ok());
         let ooo = build(false, "n", 8, 2, 0, KEY).unwrap();
         assert!(r2.handle(&ooo, t0).is_ok());
         assert_eq!(r2.handle(&ooo, t0), Err(Reject::Replay));
         // After a quiet period, a restarted sequence (reboot) is accepted.
         let later = t0 + REBOOT_QUIET + std::time::Duration::from_secs(1);
-        assert!(r.handle(&build(false, "n", 1, 77, 0, KEY).unwrap(), later).is_ok());
+        assert!(r
+            .handle(&build(false, "n", 1, 77, 0, KEY).unwrap(), later)
+            .is_ok());
     }
 
     #[test]
@@ -286,14 +335,23 @@ mod tests {
         for _ in 0..10 {
             assert_eq!(r.handle(&a, now), Err(Reject::Replay));
         }
-        assert!(r.handle(&build(false, "n", 2, 2, 0, KEY).unwrap(), now).is_ok(), "budget intact");
+        assert!(
+            r.handle(&build(false, "n", 2, 2, 0, KEY).unwrap(), now)
+                .is_ok(),
+            "budget intact"
+        );
     }
 
     #[test]
     fn rate_limits_per_node() {
         let mut r = EchoResponder::new([("n".to_string(), KEY.to_vec())].into(), 1.0, 3.0);
         let now = Instant::now();
-        let ok = (0..10).filter(|i| r.handle(&build(false, "n", *i, *i, 0, KEY).unwrap(), now).is_ok()).count();
+        let ok = (0..10)
+            .filter(|i| {
+                r.handle(&build(false, "n", *i, *i, 0, KEY).unwrap(), now)
+                    .is_ok()
+            })
+            .count();
         assert_eq!(ok, 3);
     }
 }

@@ -119,8 +119,14 @@ struct Writer<'a> {
 
 impl<'a> Writer<'a> {
     fn put(&mut self, b: &[u8]) -> Result<(), EncodeError> {
-        let end = self.pos.checked_add(b.len()).ok_or(EncodeError::BufferFull)?;
-        let dst = self.buf.get_mut(self.pos..end).ok_or(EncodeError::BufferFull)?;
+        let end = self
+            .pos
+            .checked_add(b.len())
+            .ok_or(EncodeError::BufferFull)?;
+        let dst = self
+            .buf
+            .get_mut(self.pos..end)
+            .ok_or(EncodeError::BufferFull)?;
         dst.copy_from_slice(b);
         self.pos = end;
         Ok(())
@@ -221,7 +227,12 @@ fn decode_record(rtype: u8, p: &[u8]) -> Result<Record<'_>, DecodeError> {
                     let answer = DnsAnswer::from_u8(r.u8()?).ok_or(bad)?;
                     let transport = r.u8()?;
                     let qtype = r.u16()?;
-                    Some(DnsDetail { rcode, answer, transport, qtype })
+                    Some(DnsDetail {
+                        rcode,
+                        answer,
+                        transport,
+                        qtype,
+                    })
                 } else {
                     None
                 };
@@ -410,7 +421,10 @@ fn decode_record(rtype: u8, p: &[u8]) -> Result<Record<'_>, DecodeError> {
                 })
             }
             rtype::TRACKED_BSSID => Record::TrackedBssid(r.arr::<6>()?),
-            rtype::ACK => Record::Ack(Ack { boot_id: r.arr::<16>()?, sequence: r.u64()? }),
+            rtype::ACK => Record::Ack(Ack {
+                boot_id: r.arr::<16>()?,
+                sequence: r.u64()?,
+            }),
             other => Record::Unknown {
                 rtype: other,
                 len: u16::try_from(p.len()).map_err(|_| DecodeError::TooLarge)?,
@@ -494,7 +508,13 @@ fn encode_record(w: &mut Writer<'_>, rec: &Record<'_>) -> Result<(), EncodeError
             if x.heap_frag_pct > 100 || x.queue_fill_pct > 100 {
                 return Err(EncodeError::InvalidField);
             }
-            for v in [x.age_ms, x.uptime_s, x.heap_free, x.heap_min, x.heap_max_block] {
+            for v in [
+                x.age_ms,
+                x.uptime_s,
+                x.heap_free,
+                x.heap_min,
+                x.heap_max_block,
+            ] {
                 w.u32(v)?;
             }
             w.put(&[x.heap_frag_pct, x.reset_reason, x.queue_fill_pct, 0])?;
@@ -557,7 +577,13 @@ fn encode_record(w: &mut Writer<'_>, rec: &Record<'_>) -> Result<(), EncodeError
         }
         Record::ConfigParams(x) => {
             w.u64(x.revision)?;
-            for v in [x.report_ms, x.wifi_link_ms, x.ap_scan_ms, x.heartbeat_ms, x.health_ms] {
+            for v in [
+                x.report_ms,
+                x.wifi_link_ms,
+                x.ap_scan_ms,
+                x.heartbeat_ms,
+                x.health_ms,
+            ] {
                 w.u32(v)?;
             }
             for v in [
@@ -614,7 +640,10 @@ pub struct Frame<'a> {
 impl<'a> Frame<'a> {
     /// Iterate records. The frame was validated during decode, so this never fails.
     pub fn records(&self) -> RecordIter<'a> {
-        RecordIter { r: Reader::new(self.records), left: self.record_count }
+        RecordIter {
+            r: Reader::new(self.records),
+            left: self.record_count,
+        }
     }
 }
 
@@ -677,7 +706,15 @@ pub fn decode_frame(buf: &[u8]) -> Result<Frame<'_>, DecodeError> {
     }
     let records = buf.get(start..).ok_or(DecodeError::Truncated)?;
     Ok(Frame {
-        header: Header { kind, flags, node_id, boot_id, sequence, sent_mono_ms, config_revision },
+        header: Header {
+            kind,
+            flags,
+            node_id,
+            boot_id,
+            sequence,
+            sent_mono_ms,
+            config_revision,
+        },
         record_count,
         records,
     })
@@ -714,7 +751,12 @@ impl<'a> FrameWriter<'a> {
         w.u64(header.config_revision)?;
         let count_pos = w.pos;
         w.u8(0)?;
-        Ok(Self { w, count_pos, count: 0, limit })
+        Ok(Self {
+            w,
+            count_pos,
+            count: 0,
+            limit,
+        })
     }
 
     /// Bytes written so far.
@@ -743,7 +785,11 @@ impl<'a> FrameWriter<'a> {
                 return Err(EncodeError::BufferFull);
             }
             let len16 = u16::try_from(len).map_err(|_| EncodeError::BufferFull)?;
-            let dst = self.w.buf.get_mut(len_pos..len_pos + 2).ok_or(EncodeError::BufferFull)?;
+            let dst = self
+                .w
+                .buf
+                .get_mut(len_pos..len_pos + 2)
+                .ok_or(EncodeError::BufferFull)?;
             dst.copy_from_slice(&len16.to_le_bytes());
             Ok(())
         })();

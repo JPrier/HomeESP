@@ -65,11 +65,17 @@ impl Outcome {
     }
     /// Counts in the loss denominator (an attempt actually made).
     pub fn is_eligible(self) -> bool {
-        matches!(self, Self::Success | Self::Timeout | Self::RefusedUnreachable | Self::InvalidResponse)
+        matches!(
+            self,
+            Self::Success | Self::Timeout | Self::RefusedUnreachable | Self::InvalidResponse
+        )
     }
     /// A failed attempt for health purposes.
     pub fn is_failure(self) -> bool {
-        matches!(self, Self::Timeout | Self::RefusedUnreachable | Self::InvalidResponse)
+        matches!(
+            self,
+            Self::Timeout | Self::RefusedUnreachable | Self::InvalidResponse
+        )
     }
 }
 
@@ -261,7 +267,7 @@ pub enum Occupancy {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -279,7 +285,10 @@ mod tests {
         ] {
             assert_eq!(Outcome::parse(o.as_str()), Some(o));
         }
-        assert!(!Outcome::SkippedDeferred.is_eligible(), "skips are not loss");
+        assert!(
+            !Outcome::SkippedDeferred.is_eligible(),
+            "skips are not loss"
+        );
         assert!(Outcome::Timeout.is_failure());
         assert!(!Outcome::Unsupported.is_failure());
     }

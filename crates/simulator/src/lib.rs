@@ -131,11 +131,22 @@ impl Harness {
     /// Server-equivalent ingestion of one MQTT message.
     pub fn ingest(&mut self, topic: &str, payload: &[u8], received_at: UnixMs) {
         if self.record {
-            self.recorded.push(Recorded { received_at, topic: topic.into(), hex: hex_encode(payload) });
+            self.recorded.push(Recorded {
+                received_at,
+                topic: topic.into(),
+                hex: hex_encode(payload),
+            });
         }
         let prefix = self.cfg.topic_prefix();
-        let Some(rest) = topic.strip_prefix(&prefix).and_then(|r| r.strip_prefix("/nodes/")) else { return self.reject("bad_topic") };
-        let Some((node, _suffix)) = rest.split_once('/') else { return self.reject("bad_topic") };
+        let Some(rest) = topic
+            .strip_prefix(&prefix)
+            .and_then(|r| r.strip_prefix("/nodes/"))
+        else {
+            return self.reject("bad_topic");
+        };
+        let Some((node, _suffix)) = rest.split_once('/') else {
+            return self.reject("bad_topic");
+        };
         if self.cfg.node(node).is_none() {
             return self.reject("unregistered_node");
         }
@@ -152,12 +163,24 @@ impl Harness {
         let h = frame.header;
         let clock = self.clocks.entry(node.to_string()).or_default();
         clock.observe(h.boot_id, h.sent_mono_ms, received_at);
-        let verdict = self.seqs.entry(node.to_string()).or_default().observe(h.boot_id, h.sequence);
-        if verdict == SeqVerdict::Duplicate || !self.durable.insert((node.to_string(), h.boot_id, h.sequence)) {
+        let verdict = self
+            .seqs
+            .entry(node.to_string())
+            .or_default()
+            .observe(h.boot_id, h.sequence);
+        if verdict == SeqVerdict::Duplicate
+            || !self
+                .durable
+                .insert((node.to_string(), h.boot_id, h.sequence))
+        {
             self.duplicates += 1;
             return;
         }
-        let ctx = FrameCtx { received_at, clock, current_bssid: self.bssids.get(node).cloned() };
+        let ctx = FrameCtx {
+            received_at,
+            clock,
+            current_bssid: self.bssids.get(node).cloned(),
+        };
         let obs = normalize(&frame, &ctx);
         for o in &obs {
             if let ObsKind::Wifi(w) = &o.kind {
@@ -168,13 +191,23 @@ impl Harness {
         }
         self.accepted += 1;
         let fx = self.engine.apply(Input::Observations(obs));
-        self.effects.extend(fx.into_iter().map(|e| (received_at, e)));
+        self.effects
+            .extend(fx.into_iter().map(|e| (received_at, e)));
     }
 
     pub fn central(&mut self, at: UnixMs, seq: u64, probe: ProbeObs) {
         let o = Observation {
-            prov: Provenance { source: "central".into(), boot_id: "sim-central".into(), sequence: seq, index: 0 },
-            time: EventTime { observed_at: at, uncertainty_ms: 1, received_at: at },
+            prov: Provenance {
+                source: "central".into(),
+                boot_id: "sim-central".into(),
+                sequence: seq,
+                index: 0,
+            },
+            time: EventTime {
+                observed_at: at,
+                uncertainty_ms: 1,
+                received_at: at,
+            },
             kind: ObsKind::Probe(probe),
         };
         let fx = self.engine.apply(Input::Observations(vec![o]));
@@ -192,11 +225,23 @@ impl Harness {
     }
 
     pub fn active(&self) -> Vec<Incident> {
-        self.incidents().into_iter().filter(|i| i.status != IncidentStatus::Resolved).collect()
+        self.incidents()
+            .into_iter()
+            .filter(|i| i.status != IncidentStatus::Resolved)
+            .collect()
     }
 
     pub fn notifications(&self) -> Vec<&ho_logic::engine::Notification> {
-        self.effects.iter().filter_map(|(_, e)| if let Effect::Notify(n) = e { Some(n) } else { None }).collect()
+        self.effects
+            .iter()
+            .filter_map(|(_, e)| {
+                if let Effect::Notify(n) = e {
+                    Some(n)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 
@@ -205,10 +250,13 @@ fn hex_encode(b: &[u8]) -> String {
 }
 
 pub fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
-    (0..s.len()).step_by(2).map(|i| s.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok())).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| s.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()))
+        .collect()
 }
 
 /// The simulated world.
@@ -228,7 +276,11 @@ pub struct World {
 }
 
 fn bssid_of(cfg: &SiteConfig, ap: &str) -> [u8; 6] {
-    cfg.radios.iter().find(|r| r.ap.as_str() == ap).and_then(|r| parse_mac(&r.bssid)).unwrap_or([2, 0, 0, 0, 0, 0])
+    cfg.radios
+        .iter()
+        .find(|r| r.ap.as_str() == ap)
+        .and_then(|r| parse_mac(&r.bssid))
+        .unwrap_or([2, 0, 0, 0, 0, 0])
 }
 
 fn room_center(cfg: &SiteConfig, room: &str) -> [f64; 2] {
@@ -238,7 +290,10 @@ fn room_center(cfg: &SiteConfig, room: &str) -> [f64; 2] {
         .filter(|r| !r.polygon.is_empty())
         .map(|r| {
             let n = r.polygon.len() as f64;
-            [r.polygon.iter().map(|p| p[0]).sum::<f64>() / n, r.polygon.iter().map(|p| p[1]).sum::<f64>() / n]
+            [
+                r.polygon.iter().map(|p| p[0]).sum::<f64>() / n,
+                r.polygon.iter().map(|p| p[1]).sum::<f64>() / n,
+            ]
         })
         .unwrap_or([0.0, 0.0])
 }
@@ -250,7 +305,11 @@ impl World {
             .nodes
             .iter()
             .map(|n| {
-                let ap = n.expected_ap.as_ref().map(ToString::to_string).unwrap_or_default();
+                let ap = n
+                    .expected_ap
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
                 let mut boot = [0u8; 16];
                 rng.fill(&mut boot);
                 SimNode {
@@ -275,7 +334,12 @@ impl World {
         let devices = cfg
             .devices
             .iter()
-            .map(|d| SimDevice { id: d.id.to_string(), pos: None, room: None, advertising: true })
+            .map(|d| SimDevice {
+                id: d.id.to_string(),
+                pos: None,
+                room: None,
+                advertising: true,
+            })
             .collect();
         Self {
             now: T0,
@@ -306,7 +370,10 @@ impl World {
     pub fn place(&mut self, device: &str, room: Option<&str>) {
         let pos = room.map(|r| {
             let c = room_center(&self.h.cfg, r);
-            [c[0] + self.rng.gen_range(-1.0..1.0), c[1] + self.rng.gen_range(-1.0..1.0)]
+            [
+                c[0] + self.rng.gen_range(-1.0..1.0),
+                c[1] + self.rng.gen_range(-1.0..1.0),
+            ]
         });
         if let Some(d) = self.devices.iter_mut().find(|d| d.id == device) {
             d.pos = pos;
@@ -323,7 +390,8 @@ impl World {
             n.boot = boot;
             n.seq = 0;
             n.boot_at = now;
-            n.pending_life.push((p::LifecycleEvent::Boot, 6, None, None));
+            n.pending_life
+                .push((p::LifecycleEvent::Boot, 6, None, None));
         }
     }
 
@@ -335,7 +403,8 @@ impl World {
             n.ap = to_ap.into();
             n.bssid = to;
             n.assoc_gen = n.assoc_gen.wrapping_add(1);
-            n.pending_life.push((p::LifecycleEvent::BssidChanged, 1, Some(from), Some(to)));
+            n.pending_life
+                .push((p::LifecycleEvent::BssidChanged, 1, Some(from), Some(to)));
         }
     }
 
@@ -353,7 +422,9 @@ impl World {
     }
 
     fn node_reachable(&self, n: &SimNode) -> bool {
-        n.online && self.net.ap_down.as_deref() != Some(n.ap.as_str()) && self.net.ap_radio_down.as_deref() != Some(n.ap.as_str())
+        n.online
+            && self.net.ap_down.as_deref() != Some(n.ap.as_str())
+            && self.net.ap_radio_down.as_deref() != Some(n.ap.as_str())
     }
 
     fn wireless_rtt(&mut self) -> Option<u32> {
@@ -371,7 +442,10 @@ impl World {
 
     fn node_frame(&mut self, idx: usize) -> Option<(String, Vec<u8>)> {
         let now = self.now;
-        let mono = { let n = &self.nodes[idx]; self.mono(n) };
+        let mono = {
+            let n = &self.nodes[idx];
+            self.mono(n)
+        };
         let devices = self.devices.clone();
         let cfg_loc = self.h.cfg.privacy.location_enabled;
         let net = self.net.clone();
@@ -380,7 +454,11 @@ impl World {
         let rtt_echo = self.wireless_rtt();
         let rtt_dns = self.wireless_rtt(); // independent loss draw per probe
         let n_pos = self.nodes[idx].pos;
-        let node_room = self.h.cfg.node(&self.nodes[idx].id).and_then(|c| c.room.as_ref().map(ToString::to_string));
+        let node_room = self
+            .h
+            .cfg
+            .node(&self.nodes[idx].id)
+            .and_then(|c| c.room.as_ref().map(ToString::to_string));
         // BLE summaries for advertising devices in range.
         let mut ble: Vec<(String, i8, i8, i32, u16)> = Vec::new();
         for d in devices.iter().filter(|d| d.advertising) {
@@ -429,7 +507,11 @@ impl World {
                 age_ms: 500,
                 target_id: id,
                 kind,
-                outcome: if rtt.is_some() { p::ProbeOutcome::Success } else { p::ProbeOutcome::Timeout },
+                outcome: if rtt.is_some() {
+                    p::ProbeOutcome::Success
+                } else {
+                    p::ProbeOutcome::Timeout
+                },
                 rtt_us: rtt,
                 scan_overlap: false,
                 dscp: 0,
@@ -443,14 +525,24 @@ impl World {
         let _ = w.push(&probe("server-icmp", p::ProbeKind::Icmp, rtt_srv, None));
         let _ = w.push(&probe("server-udp", p::ProbeKind::UdpEcho, rtt_echo, None));
         let dns_ok = !net.dns_down && !(net.dns_wireless_drop) && rtt_dns.is_some();
-        let dns_rtt = if dns_ok { rtt_dns.map(|r| r + 1500) } else { None };
+        let dns_rtt = if dns_ok {
+            rtt_dns.map(|r| r + 1500)
+        } else {
+            None
+        };
         let _ = w.push(&probe(
             "dns-local",
             p::ProbeKind::Dns,
             dns_rtt,
             Some(p::DnsDetail {
                 rcode: if net.dns_down { 2 } else { 0 },
-                answer: if dns_ok { p::DnsAnswer::Match } else if net.dns_down { p::DnsAnswer::Servfail } else { p::DnsAnswer::NoAnswer },
+                answer: if dns_ok {
+                    p::DnsAnswer::Match
+                } else if net.dns_down {
+                    p::DnsAnswer::Servfail
+                } else {
+                    p::DnsAnswer::NoAnswer
+                },
                 transport: 0,
                 qtype: 1,
             }),
@@ -478,10 +570,15 @@ impl World {
             n.next_scan = now + 120_000;
             let mut entries = Vec::new();
             for r in &self.h.cfg.radios {
-                let down = net.ap_down.as_deref() == Some(r.ap.as_str()) || net.ap_radio_down.as_deref() == Some(r.ap.as_str());
+                let down = net.ap_down.as_deref() == Some(r.ap.as_str())
+                    || net.ap_radio_down.as_deref() == Some(r.ap.as_str());
                 if !down {
                     if let Some(m) = parse_mac(&r.bssid) {
-                        entries.push(p::ApEntry { bssid: m, channel: r.channel.unwrap_or(1), rssi_dbm: -65 });
+                        entries.push(p::ApEntry {
+                            bssid: m,
+                            channel: r.channel.unwrap_or(1),
+                            rssi_dbm: -65,
+                        });
                     }
                 }
             }
@@ -500,7 +597,10 @@ impl World {
     }
 
     fn events_frame(&mut self, idx: usize) -> Option<(String, Vec<u8>)> {
-        let mono = { let n = &self.nodes[idx]; self.mono(n) };
+        let mono = {
+            let n = &self.nodes[idx];
+            self.mono(n)
+        };
         let n = &mut self.nodes[idx];
         if n.pending_life.is_empty() {
             return None;
@@ -529,7 +629,10 @@ impl World {
             }));
         }
         let len = w.finish();
-        Some((format!("{}/nodes/{node_id}/events", self.h.cfg.topic_prefix()), buf.get(..len)?.to_vec()))
+        Some((
+            format!("{}/nodes/{node_id}/events", self.h.cfg.topic_prefix()),
+            buf.get(..len)?.to_vec(),
+        ))
     }
 
     fn central_checks(&mut self) {
@@ -539,8 +642,13 @@ impl World {
             if self.now < due {
                 continue;
             }
-            self.next_central.insert(c.id.to_string(), self.now + i64::from(c.interval_ms));
-            let asset = c.asset.as_ref().map(|a| a.as_str().to_string()).unwrap_or_default();
+            self.next_central
+                .insert(c.id.to_string(), self.now + i64::from(c.interval_ms));
+            let asset = c
+                .asset
+                .as_ref()
+                .map(|a| a.as_str().to_string())
+                .unwrap_or_default();
             let wired_extra = if self.net.wired_congested { 60_000 } else { 0 };
             let up = match asset.as_str() {
                 "wan-a" | "wan-b" => !self.net.wan_down,
@@ -553,7 +661,11 @@ impl World {
             let is_dns = c.kind == ProbeKindConf::Dns;
             let dns_bad = is_dns && self.net.dns_down;
             let rtt = (ok && !dns_bad).then(|| 400 + self.rng.gen_range(0..300) + wired_extra);
-            let outcome = if ok { Outcome::Success } else { Outcome::Timeout };
+            let outcome = if ok {
+                Outcome::Success
+            } else {
+                Outcome::Timeout
+            };
             let probe = ProbeObs {
                 target_id: c.id.to_string(),
                 kind: ho_collectors_kind(c.kind).into(),
@@ -565,7 +677,13 @@ impl World {
                 error_code: 0,
                 dns: is_dns.then(|| DnsInfo {
                     rcode: if dns_bad { 2 } else { 0 },
-                    answer: if dns_bad { "servfail".into() } else if ok { "match".into() } else { "no_answer".into() },
+                    answer: if dns_bad {
+                        "servfail".into()
+                    } else if ok {
+                        "match".into()
+                    } else {
+                        "no_answer".into()
+                    },
                     transport: "udp".into(),
                     qtype: 1,
                 }),
@@ -588,7 +706,10 @@ impl World {
                     continue;
                 }
                 self.nodes[i].next_report += 2000;
-                let reachable = { let n = &self.nodes[i]; self.node_reachable(n) };
+                let reachable = {
+                    let n = &self.nodes[i];
+                    self.node_reachable(n)
+                };
                 let mut frames = Vec::new();
                 if let Some(f) = self.events_frame(i) {
                     frames.push(f);
@@ -648,17 +769,36 @@ impl World {
         for _ in 0..rounds {
             for room in &rooms {
                 self.place(device, Some(room));
-                let pos = self.devices.iter().find(|d| d.id == device).and_then(|d| d.pos).unwrap_or([0.0, 0.0]);
+                let pos = self
+                    .devices
+                    .iter()
+                    .find(|d| d.id == device)
+                    .and_then(|d| d.pos)
+                    .unwrap_or([0.0, 0.0]);
                 let nodes: Vec<(String, [f64; 2], Option<String>)> = self
                     .nodes
                     .iter()
-                    .map(|n| (n.id.clone(), n.pos, self.h.cfg.node(&n.id).and_then(|c| c.room.as_ref().map(ToString::to_string))))
+                    .map(|n| {
+                        (
+                            n.id.clone(),
+                            n.pos,
+                            self.h
+                                .cfg
+                                .node(&n.id)
+                                .and_then(|c| c.room.as_ref().map(ToString::to_string)),
+                        )
+                    })
                     .collect();
                 for (id, npos, nroom) in nodes {
                     let same = nroom.as_deref() == Some(room.as_str());
                     let r = self.rssi(npos, pos, same);
                     if r > -98.0 {
-                        out.push(LabeledSample { room: room.clone(), node: id, rssi: r, session: session.into() });
+                        out.push(LabeledSample {
+                            room: room.clone(),
+                            node: id,
+                            rssi: r,
+                            session: session.into(),
+                        });
                     }
                 }
             }

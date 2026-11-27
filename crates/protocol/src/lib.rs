@@ -109,7 +109,8 @@ pub fn valid_node_id(id: &str) -> bool {
     if b.first() == Some(&b'-') || b.last() == Some(&b'-') {
         return false;
     }
-    b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+    b.iter()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
 /// Validate a short identifier / label: printable ASCII without spaces or quotes.
@@ -117,7 +118,8 @@ pub fn valid_short(s: &str, max: usize) -> bool {
     let b = s.as_bytes();
     !b.is_empty()
         && b.len() <= max
-        && b.iter().all(|c| c.is_ascii_graphic() && *c != b'"' && *c != b'\\')
+        && b.iter()
+            .all(|c| c.is_ascii_graphic() && *c != b'"' && *c != b'\\')
 }
 
 /// Validate a DNS query name (LDH labels separated by dots, <= 63 bytes total here).
@@ -130,7 +132,8 @@ pub fn valid_qname(s: &str) -> bool {
         let l = label.as_bytes();
         !l.is_empty()
             && l.len() <= 63
-            && l.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'-' || *c == b'_')
+            && l.iter()
+                .all(|c| c.is_ascii_alphanumeric() || *c == b'-' || *c == b'_')
             && l.first() != Some(&b'-')
             && l.last() != Some(&b'-')
     })

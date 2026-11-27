@@ -13,9 +13,16 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 /// Build the MQTT client and event loop from config.
-pub fn mqtt_client(app_cfg: &ho_domain::SiteConfig, password: Option<String>) -> Result<(AsyncClient, EventLoop), String> {
+pub fn mqtt_client(
+    app_cfg: &ho_domain::SiteConfig,
+    password: Option<String>,
+) -> Result<(AsyncClient, EventLoop), String> {
     let m = &app_cfg.mqtt;
-    let mut o = MqttOptions::new(format!("observatory-server-{}", app_cfg.site_id), &m.host, m.port);
+    let mut o = MqttOptions::new(
+        format!("observatory-server-{}", app_cfg.site_id),
+        &m.host,
+        m.port,
+    );
     o.set_keep_alive(Duration::from_secs(u64::from(m.keepalive_s.max(5))));
     o.set_max_packet_size(8192, 8192);
     o.set_clean_session(false);
@@ -57,21 +64,34 @@ pub async fn run_mqtt(app: App, client: AsyncClient, mut el: EventLoop, cancel: 
                     ("capabilities", QoS::AtLeastOnce),
                     ("config/reported", QoS::AtLeastOnce),
                 ] {
-                    if let Err(e) = client.subscribe(format!("{prefix}/nodes/+/{suffix}"), qos).await {
+                    if let Err(e) = client
+                        .subscribe(format!("{prefix}/nodes/+/{suffix}"), qos)
+                        .await
+                    {
                         tracing::warn!(error = %e, "subscribe failed");
                     }
                 }
                 if app.cfg.home_assistant.enabled {
-                    let _ = client.subscribe(format!("{}/status", app.cfg.home_assistant.discovery_prefix), QoS::AtLeastOnce).await;
+                    let _ = client
+                        .subscribe(
+                            format!("{}/status", app.cfg.home_assistant.discovery_prefix),
+                            QoS::AtLeastOnce,
+                        )
+                        .await;
                     publish_ha_discovery(&app, &client).await;
                 }
-                let fx = app.apply(Input::Ingestion { ok: true, at: now_ms() });
+                let fx = app.apply(Input::Ingestion {
+                    ok: true,
+                    at: now_ms(),
+                });
                 effects::handle(&app, fx).await;
                 let app2 = app.clone();
                 tokio::spawn(async move { publish_all_desired(&app2).await });
             }
             Ok(Event::Incoming(Packet::Publish(p))) => {
-                if app.cfg.home_assistant.enabled && p.topic == format!("{}/status", app.cfg.home_assistant.discovery_prefix) {
+                if app.cfg.home_assistant.enabled
+                    && p.topic == format!("{}/status", app.cfg.home_assistant.discovery_prefix)
+                {
                     if p.payload.as_ref() == b"online" {
                         publish_ha_discovery(&app, &client).await; // HA restarted: republish
                     }
@@ -92,7 +112,10 @@ pub async fn run_mqtt(app: App, client: AsyncClient, mut el: EventLoop, cancel: 
             Err(e) => {
                 if app.mqtt_connected.swap(false, Ordering::Relaxed) {
                     tracing::warn!(error = %e, "mqtt connection lost");
-                    let fx = app.apply(Input::Ingestion { ok: false, at: now_ms() });
+                    let fx = app.apply(Input::Ingestion {
+                        ok: false,
+                        at: now_ms(),
+                    });
                     effects::handle(&app, fx).await;
                 } else {
                     tracing::debug!(error = %e, "mqtt reconnect failed");
@@ -108,7 +131,9 @@ pub async fn run_mqtt(app: App, client: AsyncClient, mut el: EventLoop, cancel: 
     }
     if app.cfg.home_assistant.enabled {
         let w = ha::site_availability(&app.cfg, false);
-        let _ = client.publish(w.topic, QoS::AtLeastOnce, true, w.payload).await;
+        let _ = client
+            .publish(w.topic, QoS::AtLeastOnce, true, w.payload)
+            .await;
     }
     let _ = client.disconnect().await;
 }
@@ -121,14 +146,26 @@ async fn ingest_worker(app: App, mut rx: mpsc::Receiver<(String, Vec<u8>)>) {
 
 /// Publish (retained) desired config for one node.
 pub async fn publish_desired(app: &App, node: &str) {
-    let Some(client) = app.mqtt_client() else { return };
+    let Some(client) = app.mqtt_client() else {
+        return;
+    };
     let Some(nc) = app.cfg.node(node) else { return };
     let rev = app.desired_revision.load(Ordering::Relaxed);
     match crate::desired::desired_frame(&app.cfg, nc, rev, app.next_server_seq()) {
         Ok(f) => {
             let topic = format!("{}/nodes/{node}/config/desired", app.cfg.topic_prefix());
-            if client.publish(topic, QoS::AtLeastOnce, true, f).await.is_ok() {
-                let _ = app.writer.send(WriteCmd::Desired { node: node.into(), revision: rev }).await;
+            if client
+                .publish(topic, QoS::AtLeastOnce, true, f)
+                .await
+                .is_ok()
+            {
+                let _ = app
+                    .writer
+                    .send(WriteCmd::Desired {
+                        node: node.into(),
+                        revision: rev,
+                    })
+                    .await;
             }
         }
         Err(e) => tracing::error!(node, error = %e, "cannot encode desired config"),
@@ -143,10 +180,14 @@ pub async fn publish_all_desired(app: &App) {
 
 async fn publish_ha_discovery(app: &App, client: &AsyncClient) {
     for p in ha::discovery(&app.cfg) {
-        let _ = client.publish(p.topic, QoS::AtLeastOnce, p.retain, p.payload).await;
+        let _ = client
+            .publish(p.topic, QoS::AtLeastOnce, p.retain, p.payload)
+            .await;
     }
     let a = ha::site_availability(&app.cfg, true);
-    let _ = client.publish(a.topic, QoS::AtLeastOnce, true, a.payload).await;
+    let _ = client
+        .publish(a.topic, QoS::AtLeastOnce, true, a.payload)
+        .await;
 }
 
 /// Publish HA states periodically, only when changed (avoid recorder flooding).
@@ -155,13 +196,17 @@ pub async fn run_ha(app: App, cancel: CancellationToken) {
         return;
     }
     let mut last: HashMap<String, String> = HashMap::new();
-    let period = Duration::from_millis(u64::try_from(app.cfg.home_assistant.metrics_interval_ms.max(5000)).unwrap_or(30_000));
+    let period = Duration::from_millis(
+        u64::try_from(app.cfg.home_assistant.metrics_interval_ms.max(5000)).unwrap_or(30_000),
+    );
     loop {
         tokio::select! {
             _ = cancel.cancelled() => return,
             _ = tokio::time::sleep(period) => {}
         }
-        let Some(client) = app.mqtt_client() else { continue };
+        let Some(client) = app.mqtt_client() else {
+            continue;
+        };
         if !app.mqtt_connected.load(Ordering::Relaxed) {
             continue;
         }
@@ -171,7 +216,16 @@ pub async fn run_ha(app: App, cancel: CancellationToken) {
             if last.get(&p.topic) == Some(&p.payload) {
                 continue;
             }
-            if client.publish(p.topic.clone(), QoS::AtLeastOnce, p.retain, p.payload.clone()).await.is_ok() {
+            if client
+                .publish(
+                    p.topic.clone(),
+                    QoS::AtLeastOnce,
+                    p.retain,
+                    p.payload.clone(),
+                )
+                .await
+                .is_ok()
+            {
                 last.insert(p.topic, p.payload);
             }
         }
@@ -206,7 +260,10 @@ pub async fn run_outbox(app: App, cancel: CancellationToken) {
             _ = tokio::time::sleep(Duration::from_secs(2)) => {}
         }
         let now = now_ms();
-        let due = match app.reader().and_then(|r| r.outbox_due(now, 20).map_err(|e| e.to_string())) {
+        let due = match app
+            .reader()
+            .and_then(|r| r.outbox_due(now, 20).map_err(|e| e.to_string()))
+        {
             Ok(d) => d,
             Err(e) => {
                 tracing::debug!(error = %e, "outbox read failed");
@@ -214,14 +271,28 @@ pub async fn run_outbox(app: App, cancel: CancellationToken) {
             }
         };
         for item in due {
-            let Some(n) = app.cfg.notifications.notifiers.iter().find(|n| n.id == item.notifier) else {
+            let Some(n) = app
+                .cfg
+                .notifications
+                .notifiers
+                .iter()
+                .find(|n| n.id == item.notifier)
+            else {
                 let _ = app
                     .writer
-                    .send(WriteCmd::OutboxAttempt { id: item.id, now, ok: false, error: Some("unknown notifier".into()), retry_at: None })
+                    .send(WriteCmd::OutboxAttempt {
+                        id: item.id,
+                        now,
+                        ok: false,
+                        error: Some("unknown notifier".into()),
+                        retry_at: None,
+                    })
                     .await;
                 continue;
             };
-            let Ok(msg) = serde_json::from_str::<notify::Message>(&item.payload) else { continue };
+            let Ok(msg) = serde_json::from_str::<notify::Message>(&item.payload) else {
+                continue;
+            };
             let token = app.notifier_tokens.get(&n.id).map(String::as_str);
             let res = notify::deliver(n, token, &msg).await;
             let (ok, err, retry) = match res {
@@ -229,15 +300,31 @@ pub async fn run_outbox(app: App, cancel: CancellationToken) {
                     Metrics::inc(&app.metrics.notifications_sent);
                     (true, None, None)
                 }
-                Err(notify::DeliveryError::Transient(e)) if item.attempts + 1 < notify::MAX_ATTEMPTS => {
-                    (false, Some(e), Some(now + notify::backoff_ms(item.attempts)))
+                Err(notify::DeliveryError::Transient(e))
+                    if item.attempts + 1 < notify::MAX_ATTEMPTS =>
+                {
+                    (
+                        false,
+                        Some(e),
+                        Some(now + notify::backoff_ms(item.attempts)),
+                    )
                 }
-                Err(notify::DeliveryError::Transient(e)) | Err(notify::DeliveryError::Permanent(e)) => {
+                Err(notify::DeliveryError::Transient(e))
+                | Err(notify::DeliveryError::Permanent(e)) => {
                     Metrics::inc(&app.metrics.notifications_failed);
                     (false, Some(e), None)
                 }
             };
-            let _ = app.writer.send(WriteCmd::OutboxAttempt { id: item.id, now, ok, error: err, retry_at: retry }).await;
+            let _ = app
+                .writer
+                .send(WriteCmd::OutboxAttempt {
+                    id: item.id,
+                    now,
+                    ok,
+                    error: err,
+                    retry_at: retry,
+                })
+                .await;
         }
     }
 }
@@ -249,7 +336,13 @@ pub async fn run_central(app: App, cancel: CancellationToken) {
     let seq = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let mut handles = Vec::new();
     for check in app.cfg.central_checks.clone() {
-        let (app, sem, cancel, boot, seq) = (app.clone(), sem.clone(), cancel.clone(), boot.clone(), seq.clone());
+        let (app, sem, cancel, boot, seq) = (
+            app.clone(),
+            sem.clone(),
+            cancel.clone(),
+            boot.clone(),
+            seq.clone(),
+        );
         handles.push(tokio::spawn(async move {
             let phase = crc(check.id.as_str()) % u64::from(check.interval_ms.max(1));
             tokio::select! { _ = cancel.cancelled() => return, _ = tokio::time::sleep(Duration::from_millis(phase)) => {} }
@@ -272,14 +365,25 @@ pub async fn run_central(app: App, cancel: CancellationToken) {
 }
 
 fn crc(s: &str) -> u64 {
-    s.bytes().fold(1469598103934665603u64, |h, b| (h ^ u64::from(b)).wrapping_mul(1099511628211))
+    s.bytes().fold(1469598103934665603u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(1099511628211)
+    })
 }
 
 /// Persist and process one central observation.
 pub async fn record_central(app: &App, boot: &str, seq: u64, at: i64, p: ho_domain::ProbeObs) {
     let obs = ho_domain::Observation {
-        prov: ho_domain::Provenance { source: "central".into(), boot_id: boot.into(), sequence: seq, index: 0 },
-        time: ho_domain::EventTime { observed_at: at, uncertainty_ms: 1, received_at: now_ms() },
+        prov: ho_domain::Provenance {
+            source: "central".into(),
+            boot_id: boot.into(),
+            sequence: seq,
+            index: 0,
+        },
+        time: ho_domain::EventTime {
+            observed_at: at,
+            uncertainty_ms: 1,
+            received_at: now_ms(),
+        },
         kind: ho_domain::ObsKind::Probe(p),
     };
     let meta = ho_storage::BatchMeta {
@@ -296,7 +400,12 @@ pub async fn record_central(app: &App, boot: &str, seq: u64, at: i64, p: ho_doma
         bytes: 0,
         clock_uncertainty_ms: Some(1),
     };
-    if app.writer.insert_frame(meta, vec![obs.clone()]).await.is_err() {
+    if app
+        .writer
+        .insert_frame(meta, vec![obs.clone()])
+        .await
+        .is_err()
+    {
         return;
     }
     let fx = app.apply(Input::Observations(vec![obs]));
@@ -305,7 +414,9 @@ pub async fn record_central(app: &App, boot: &str, seq: u64, at: i64, p: ho_doma
 
 /// UDP echo responder.
 pub async fn run_echo(app: App, keys: HashMap<String, Vec<u8>>, cancel: CancellationToken) {
-    let Some(bind) = app.cfg.server.echo_bind.clone() else { return };
+    let Some(bind) = app.cfg.server.echo_bind.clone() else {
+        return;
+    };
     let sock = match tokio::net::UdpSocket::bind(&bind).await {
         Ok(s) => s,
         Err(e) => {
@@ -333,14 +444,38 @@ pub async fn run_maintenance(app: App, cancel: CancellationToken) {
         let now = now_ms();
         let _ = app.writer.send(WriteCmd::RollupHours { now }).await;
         if n % 6 == 1 {
-            let r = app.writer.call(|reply| WriteCmd::Retention { now, r: app.cfg.retention.clone(), reply }).await;
+            let r = app
+                .writer
+                .call(|reply| WriteCmd::Retention {
+                    now,
+                    r: app.cfg.retention.clone(),
+                    reply,
+                })
+                .await;
             tracing::info!(?r, "retention pass");
         }
-        if let Ok(size) = app.reader().and_then(|s| s.size_bytes().map_err(|e| e.to_string())) {
+        if let Ok(size) = app
+            .reader()
+            .and_then(|s| s.size_bytes().map_err(|e| e.to_string()))
+        {
             let limit = app.cfg.retention.max_db_mb.saturating_mul(1024 * 1024);
             if u64::try_from(size).unwrap_or(0) > limit / 10 * 9 {
-                tracing::warn!(size, limit, "database above 90% of budget; retention will trim oldest raw data");
-                let _ = app.writer.call(|reply| WriteCmd::Retention { now, r: ho_domain::Retention { raw_days: 1, ..app.cfg.retention.clone() }, reply }).await;
+                tracing::warn!(
+                    size,
+                    limit,
+                    "database above 90% of budget; retention will trim oldest raw data"
+                );
+                let _ = app
+                    .writer
+                    .call(|reply| WriteCmd::Retention {
+                        now,
+                        r: ho_domain::Retention {
+                            raw_days: 1,
+                            ..app.cfg.retention.clone()
+                        },
+                        reply,
+                    })
+                    .await;
             }
         }
     }
@@ -348,7 +483,9 @@ pub async fn run_maintenance(app: App, cancel: CancellationToken) {
 
 /// External watchdog heartbeat (optional).
 pub async fn run_watchdog(app: App, cancel: CancellationToken) {
-    let Some(w) = app.cfg.watchdog.clone() else { return };
+    let Some(w) = app.cfg.watchdog.clone() else {
+        return;
+    };
     loop {
         let ok = ho_integrations::watchdog::ping(&w.url, Duration::from_secs(10)).await;
         if let Ok(mut s) = app.watchdog_ok.lock() {

@@ -81,10 +81,20 @@ impl TargetHealth {
     pub fn evaluate(&mut self, now: UnixMs, th: &Thresholds) -> Option<HealthChange> {
         self.window.evict(now);
         let s = self.window.stats();
-        let stale_after = self.window.typical_interval_ms().map(|i| (i * 4).max(30_000)).unwrap_or(60_000);
-        let stale = self.window.last_time().is_none_or(|t| now - t > stale_after);
+        let stale_after = self
+            .window
+            .typical_interval_ms()
+            .map(|i| (i * 4).max(30_000))
+            .unwrap_or(60_000);
+        let stale = self
+            .window
+            .last_time()
+            .is_none_or(|t| now - t > stale_after);
         let (next, why) = if stale {
-            (Health::Unknown, format!("no fresh results for {}s", stale_after / 1000))
+            (
+                Health::Unknown,
+                format!("no fresh results for {}s", stale_after / 1000),
+            )
         } else {
             self.classify(now, &s, th)
         };
@@ -94,18 +104,33 @@ impl TargetHealth {
     fn classify(&mut self, now: UnixMs, s: &WindowStats, th: &Thresholds) -> (Health, String) {
         if self.consecutive_fail >= th.critical_consecutive_failures {
             self.recovering_since = None;
-            return (Health::Failed, format!("{} consecutive failed checks", self.consecutive_fail));
+            return (
+                Health::Failed,
+                format!("{} consecutive failed checks", self.consecutive_fail),
+            );
         }
         let degraded = self.degraded_reason(s, th);
-        let was_bad = matches!(self.health, Health::Failed | Health::Degraded | Health::Recovering);
+        let was_bad = matches!(
+            self.health,
+            Health::Failed | Health::Degraded | Health::Recovering
+        );
         if was_bad {
             if self.consecutive_ok >= th.recovery_consecutive_successes && degraded.is_none() {
                 let since = *self.recovering_since.get_or_insert(now);
                 if now - since >= th.recovery_stable_ms {
                     self.recovering_since = None;
-                    return (Health::Healthy, "recovered: sustained successful checks".into());
+                    return (
+                        Health::Healthy,
+                        "recovered: sustained successful checks".into(),
+                    );
                 }
-                return (Health::Recovering, format!("{} consecutive successes; confirming stability", self.consecutive_ok));
+                return (
+                    Health::Recovering,
+                    format!(
+                        "{} consecutive successes; confirming stability",
+                        self.consecutive_ok
+                    ),
+                );
             }
             if let Some(d) = degraded {
                 self.recovering_since = None;
@@ -132,14 +157,19 @@ impl TargetHealth {
                 // small window must not raise an alarm).
                 let lb = wilson_lower(s.timeouts, s.eligible) * 100.0;
                 if l > th.loss_degraded_pct && lb > th.loss_degraded_pct && s.timeouts >= 3 {
-                    return Some(format!("loss {l:.1}% (lower bound {lb:.1}%) over {} eligible probes", s.eligible));
+                    return Some(format!(
+                        "loss {l:.1}% (lower bound {lb:.1}%) over {} eligible probes",
+                        s.eligible
+                    ));
                 }
             }
         }
         if s.successes >= th.latency_min_samples {
             if let Some(p95) = s.p95_ms {
                 let over_abs = p95 > th.latency_p95_abs_ms;
-                let over_rel = self.baseline_p95_ms.is_none_or(|b| p95 > b * th.latency_baseline_multiple);
+                let over_rel = self
+                    .baseline_p95_ms
+                    .is_none_or(|b| p95 > b * th.latency_baseline_multiple);
                 if over_abs && over_rel {
                     return Some(format!("p95 {p95:.1} ms over {} samples", s.successes));
                 }
@@ -150,7 +180,10 @@ impl TargetHealth {
             // incident, 3 out of 150 is background noise.
             let lb = wilson_lower(s.dns_bad, s.eligible.max(s.dns_bad)) * 100.0;
             if lb > th.loss_degraded_pct {
-                return Some(format!("{} of {} DNS answers invalid/failed (lower bound {lb:.1}%)", s.dns_bad, s.eligible));
+                return Some(format!(
+                    "{} of {} DNS answers invalid/failed (lower bound {lb:.1}%)",
+                    s.dns_bad, s.eligible
+                ));
             }
         }
         None
@@ -164,7 +197,11 @@ impl TargetHealth {
             self.reason = why;
             return None;
         }
-        let ch = HealthChange { from: self.health, to: next, reason: why.clone() };
+        let ch = HealthChange {
+            from: self.health,
+            to: next,
+            reason: why.clone(),
+        };
         self.health = next;
         self.reason = why;
         self.since = now;
@@ -205,7 +242,12 @@ pub fn wilson_lower(k: u32, n: u32) -> f64 {
 
 /// Liveness from the freshest authenticated frame (spec §8.1: retained status alone
 /// is not proof). `Missing` means "no fresh data", never "powered off".
-pub fn liveness(last_seen: Option<UnixMs>, now: UnixMs, missing_ms: i64, ingestion_ok: bool) -> NodeLiveness {
+pub fn liveness(
+    last_seen: Option<UnixMs>,
+    now: UnixMs,
+    missing_ms: i64,
+    ingestion_ok: bool,
+) -> NodeLiveness {
     if !ingestion_ok {
         return NodeLiveness::Unknown;
     }
@@ -218,7 +260,7 @@ pub fn liveness(last_seen: Option<UnixMs>, now: UnixMs, missing_ms: i64, ingesti
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -275,7 +317,18 @@ mod tests {
         let mut h = TargetHealth::new(300_000, false);
         for i in 0..40i64 {
             let ok = i % 8 != 0; // 12.5% loss, never 3 in a row
-            h.record(i * 5000, if ok { Outcome::Success } else { Outcome::Timeout }, ok.then_some(900), None, false, &t);
+            h.record(
+                i * 5000,
+                if ok {
+                    Outcome::Success
+                } else {
+                    Outcome::Timeout
+                },
+                ok.then_some(900),
+                None,
+                false,
+                &t,
+            );
         }
         assert_eq!(h.health, Health::Degraded, "{}", h.reason);
         assert!(h.reason.contains("loss"));
@@ -289,7 +342,9 @@ mod tests {
             h.record(i * 5000, Outcome::Success, Some(500), None, false, &t);
         }
         for _ in 0..5 {
-            assert!(h.record(1000, Outcome::Timeout, None, None, false, &t).is_none());
+            assert!(h
+                .record(1000, Outcome::Timeout, None, None, false, &t)
+                .is_none());
         }
         assert_eq!(h.health, Health::Healthy);
     }
@@ -310,7 +365,14 @@ mod tests {
         let t = th();
         let mut h = TargetHealth::new(300_000, true);
         for i in 1..=4 {
-            h.record(i * 30_000, Outcome::Success, Some(2000), Some(false), false, &t);
+            h.record(
+                i * 30_000,
+                Outcome::Success,
+                Some(2000),
+                Some(false),
+                false,
+                &t,
+            );
         }
         assert_eq!(h.health, Health::Failed);
     }
@@ -322,14 +384,36 @@ mod tests {
         let mut h = TargetHealth::new(300_000, false);
         for i in 0..150i64 {
             let lost = i % 37 == 5;
-            h.record(i * 2000, if lost { Outcome::Timeout } else { Outcome::Success }, (!lost).then_some(900), None, false, &t);
+            h.record(
+                i * 2000,
+                if lost {
+                    Outcome::Timeout
+                } else {
+                    Outcome::Success
+                },
+                (!lost).then_some(900),
+                None,
+                false,
+                &t,
+            );
         }
         assert_eq!(h.health, Health::Healthy, "{}", h.reason);
         // 12% loss is unambiguous.
         let mut h = TargetHealth::new(300_000, false);
         for i in 0..150i64 {
             let lost = i % 8 == 3;
-            h.record(i * 2000, if lost { Outcome::Timeout } else { Outcome::Success }, (!lost).then_some(900), None, false, &t);
+            h.record(
+                i * 2000,
+                if lost {
+                    Outcome::Timeout
+                } else {
+                    Outcome::Success
+                },
+                (!lost).then_some(900),
+                None,
+                false,
+                &t,
+            );
         }
         assert_eq!(h.health, Health::Degraded);
         assert!(wilson_lower(0, 10) < 1e-9 && wilson_lower(10, 10) > 0.6);
@@ -337,10 +421,19 @@ mod tests {
 
     #[test]
     fn liveness_rules() {
-        assert_eq!(liveness(Some(0), 10_000, 30_000, true), NodeLiveness::Online);
+        assert_eq!(
+            liveness(Some(0), 10_000, 30_000, true),
+            NodeLiveness::Online
+        );
         assert_eq!(liveness(Some(0), 20_000, 30_000, true), NodeLiveness::Stale);
-        assert_eq!(liveness(Some(0), 31_000, 30_000, true), NodeLiveness::Missing);
-        assert_eq!(liveness(Some(0), 31_000, 30_000, false), NodeLiveness::Unknown);
+        assert_eq!(
+            liveness(Some(0), 31_000, 30_000, true),
+            NodeLiveness::Missing
+        );
+        assert_eq!(
+            liveness(Some(0), 31_000, 30_000, false),
+            NodeLiveness::Unknown
+        );
         assert_eq!(liveness(None, 31_000, 30_000, true), NodeLiveness::Unknown);
     }
 }

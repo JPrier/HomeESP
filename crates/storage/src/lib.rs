@@ -116,7 +116,10 @@ impl Store {
 
     /// Read-only connection for query workloads.
     pub fn open_readonly(path: impl AsRef<Path>) -> Result<Self> {
-        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         Ok(Self { conn })
     }
@@ -130,14 +133,19 @@ impl Store {
     }
 
     pub fn schema_version(&self) -> Result<i64> {
-        Ok(self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))?)
+        Ok(self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))?)
     }
 
     fn migrate(&mut self) -> Result<()> {
         let current = self.schema_version()?;
         let latest = MIGRATIONS.last().map_or(0, |m| m.0);
         if current > latest {
-            return Err(StoreError::TooNew { found: current, supported: latest });
+            return Err(StoreError::TooNew {
+                found: current,
+                supported: latest,
+            });
         }
         for (v, sql) in MIGRATIONS.iter().filter(|(v, _)| *v > current) {
             let tx = self.conn.transaction()?;
@@ -196,18 +204,42 @@ impl Store {
         Ok(InsertOutcome::Inserted(batch_id))
     }
 
-    pub fn record_dlq(&mut self, at: UnixMs, node: Option<&str>, topic: &str, reason: &str, payload: &[u8]) -> Result<()> {
-        let head: String = payload.iter().take(32).map(|b| format!("{b:02x}")).collect();
+    pub fn record_dlq(
+        &mut self,
+        at: UnixMs,
+        node: Option<&str>,
+        topic: &str,
+        reason: &str,
+        payload: &[u8],
+    ) -> Result<()> {
+        let head: String = payload
+            .iter()
+            .take(32)
+            .map(|b| format!("{b:02x}"))
+            .collect();
         self.conn.execute(
             "INSERT INTO dlq (at,node_id,topic,reason,size,head_hex) VALUES (?1,?2,?3,?4,?5,?6)",
             params![at, node, topic, reason, payload.len() as i64, head],
         )?;
         // Bound the DLQ.
-        self.conn.execute("DELETE FROM dlq WHERE id <= (SELECT max(id) - 1000 FROM dlq)", [])?;
+        self.conn.execute(
+            "DELETE FROM dlq WHERE id <= (SELECT max(id) - 1000 FROM dlq)",
+            [],
+        )?;
         Ok(())
     }
 
-    pub fn upsert_capabilities(&mut self, node: &str, at: UnixMs, chip: &str, fw: &str, profile: &str, features: u32, flash_kb: u32, json: &str) -> Result<()> {
+    pub fn upsert_capabilities(
+        &mut self,
+        node: &str,
+        at: UnixMs,
+        chip: &str,
+        fw: &str,
+        profile: &str,
+        features: u32,
+        flash_kb: u32,
+        json: &str,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO nodes (id, first_seen, last_seen, chip, fw_version, profile, features, flash_kb, capabilities)
              VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -218,7 +250,13 @@ impl Store {
         Ok(())
     }
 
-    pub fn set_config_status(&mut self, node: &str, revision: u64, state: &str, reason: u8) -> Result<()> {
+    pub fn set_config_status(
+        &mut self,
+        node: &str,
+        revision: u64,
+        state: &str,
+        reason: u8,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO nodes (id, applied_revision, config_state, config_reason) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(id) DO UPDATE SET applied_revision=excluded.applied_revision, config_state=excluded.config_state, config_reason=excluded.config_reason",
@@ -300,7 +338,10 @@ impl Store {
     }
 
     pub fn kv_get(&self, key: &str) -> Result<Option<String>> {
-        Ok(self.conn.query_row("SELECT value FROM kv WHERE key=?1", [key], |r| r.get(0)).optional()?)
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM kv WHERE key=?1", [key], |r| r.get(0))
+            .optional()?)
     }
 
     pub fn kv_set(&mut self, key: &str, value: &str) -> Result<()> {
@@ -330,15 +371,28 @@ impl Store {
     }
 
     /// Record a delivery attempt. `retry_at = None` with `ok=false` marks permanent failure.
-    pub fn outbox_attempt(&mut self, id: i64, now: UnixMs, ok: bool, error: Option<&str>, retry_at: Option<UnixMs>) -> Result<()> {
+    pub fn outbox_attempt(
+        &mut self,
+        id: i64,
+        now: UnixMs,
+        ok: bool,
+        error: Option<&str>,
+        retry_at: Option<UnixMs>,
+    ) -> Result<()> {
         let tx = self.conn.transaction()?;
-        tx.execute("INSERT INTO delivery_attempts (outbox_id, at, ok, error) VALUES (?1,?2,?3,?4)", params![id, now, ok, error])?;
+        tx.execute(
+            "INSERT INTO delivery_attempts (outbox_id, at, ok, error) VALUES (?1,?2,?3,?4)",
+            params![id, now, ok, error],
+        )?;
         if ok {
             tx.execute("UPDATE outbox SET status='sent', attempts=attempts+1, delivered_at=?2, last_error=NULL WHERE id=?1", params![id, now])?;
         } else if let Some(r) = retry_at {
             tx.execute("UPDATE outbox SET attempts=attempts+1, next_attempt_at=?2, last_error=?3 WHERE id=?1", params![id, r, error])?;
         } else {
-            tx.execute("UPDATE outbox SET status='failed', attempts=attempts+1, last_error=?2 WHERE id=?1", params![id, error])?;
+            tx.execute(
+                "UPDATE outbox SET status='failed', attempts=attempts+1, last_error=?2 WHERE id=?1",
+                params![id, error],
+            )?;
         }
         tx.commit()?;
         Ok(())
@@ -373,17 +427,34 @@ impl Store {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
-    pub fn add_incident_note(&mut self, id: &str, at: UnixMs, actor: &str, note: &str) -> Result<bool> {
-        let notes: Option<String> = self.conn.query_row("SELECT notes FROM incidents WHERE id=?1", [id], |r| r.get(0)).optional()?;
+    pub fn add_incident_note(
+        &mut self,
+        id: &str,
+        at: UnixMs,
+        actor: &str,
+        note: &str,
+    ) -> Result<bool> {
+        let notes: Option<String> = self
+            .conn
+            .query_row("SELECT notes FROM incidents WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()?;
         let Some(notes) = notes else { return Ok(false) };
         let mut v: Vec<serde_json::Value> = serde_json::from_str(&notes).unwrap_or_default();
         v.push(serde_json::json!({"at": at, "actor": actor, "note": note}));
-        self.conn.execute("UPDATE incidents SET notes=?2 WHERE id=?1", params![id, serde_json::to_string(&v)?])?;
+        self.conn.execute(
+            "UPDATE incidents SET notes=?2 WHERE id=?1",
+            params![id, serde_json::to_string(&v)?],
+        )?;
         Ok(true)
     }
 
     pub fn acknowledge_incident(&mut self, id: &str) -> Result<bool> {
-        Ok(self.conn.execute("UPDATE incidents SET acknowledged=1 WHERE id=?1", [id])? > 0)
+        Ok(self
+            .conn
+            .execute("UPDATE incidents SET acknowledged=1 WHERE id=?1", [id])?
+            > 0)
     }
 
     pub fn nodes(&self) -> Result<Vec<serde_json::Value>> {
@@ -466,38 +537,63 @@ impl Store {
 
     /// Bounded metric series for a probe target, choosing resolution to keep at most
     /// `max_points` buckets. Gaps are preserved (no fabricated buckets).
-    pub fn probe_series(&self, target: &str, vantage: Option<&str>, from: UnixMs, to: UnixMs, max_points: usize) -> Result<Vec<Series>> {
+    pub fn probe_series(
+        &self,
+        target: &str,
+        vantage: Option<&str>,
+        from: UnixMs,
+        to: UnixMs,
+        max_points: usize,
+    ) -> Result<Vec<Series>> {
         let span_s = ((to - from).max(1000) / 1000).max(1);
         let max_points = max_points.clamp(10, 2000) as i64;
         let res: i64 = if span_s / 60 <= max_points { 60 } else { 3600 };
-        let res = if res == 60 && span_s / 60 > max_points { 3600 } else { res };
+        let res = if res == 60 && span_s / 60 > max_points {
+            3600
+        } else {
+            res
+        };
         let mut st = self.conn.prepare(
             "SELECT vantage, bucket_start, samples, eligible, successes, timeouts, dns_bad, rtt_max_us, hist FROM rollups
              WHERE target_id=?1 AND (?2 IS NULL OR vantage=?2) AND resolution_s=?3 AND bucket_start >= ?4 AND bucket_start <= ?5
              ORDER BY vantage, bucket_start",
         )?;
         let base = if res == 3600 { 60 } else { res };
-        let rows = st.query_map(params![target, vantage, base, from - from.rem_euclid(base * 1000), to], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, i64>(3)?,
-                r.get::<_, i64>(4)?,
-                r.get::<_, i64>(5)?,
-                r.get::<_, i64>(6)?,
-                r.get::<_, Option<i64>>(7)?,
-                r.get::<_, String>(8)?,
-            ))
-        })?;
+        let rows = st.query_map(
+            params![
+                target,
+                vantage,
+                base,
+                from - from.rem_euclid(base * 1000),
+                to
+            ],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, i64>(4)?,
+                    r.get::<_, i64>(5)?,
+                    r.get::<_, i64>(6)?,
+                    r.get::<_, Option<i64>>(7)?,
+                    r.get::<_, String>(8)?,
+                ))
+            },
+        )?;
         let mut out: Vec<Series> = Vec::new();
         // Merge minute rows into the chosen resolution (histograms merge exactly).
-        let mut acc: std::collections::BTreeMap<(String, i64), (i64, i64, i64, i64, i64, Option<i64>, LogHistogram)> = Default::default();
+        let mut acc: std::collections::BTreeMap<
+            (String, i64),
+            (i64, i64, i64, i64, i64, Option<i64>, LogHistogram),
+        > = Default::default();
         for row in rows {
             let (v, t, samples, eligible, succ, timeouts, dns_bad, max, hist) = row?;
             let bucket = t - t.rem_euclid(res * 1000);
             let h: LogHistogram = serde_json::from_str(&hist).unwrap_or_default();
-            let e = acc.entry((v, bucket)).or_insert((0, 0, 0, 0, 0, None, LogHistogram::default()));
+            let e =
+                acc.entry((v, bucket))
+                    .or_insert((0, 0, 0, 0, 0, None, LogHistogram::default()));
             e.0 += samples;
             e.1 += eligible;
             e.2 += succ;
@@ -522,7 +618,12 @@ impl Store {
             };
             match out.last_mut() {
                 Some(s) if s.vantage == v => s.points.push(p),
-                _ => out.push(Series { target_id: target.into(), vantage: v, resolution_s: res, points: vec![p] }),
+                _ => out.push(Series {
+                    target_id: target.into(),
+                    vantage: v,
+                    resolution_s: res,
+                    points: vec![p],
+                }),
             }
         }
         Ok(out)
@@ -535,7 +636,12 @@ impl Store {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
-    pub fn location_history(&self, device: Option<&str>, from: UnixMs, limit: usize) -> Result<Vec<serde_json::Value>> {
+    pub fn location_history(
+        &self,
+        device: Option<&str>,
+        from: UnixMs,
+        limit: usize,
+    ) -> Result<Vec<serde_json::Value>> {
         let mut st = self.conn.prepare(
             "SELECT device_id, at, room_id, state, confidence, model_revision FROM location_transitions
              WHERE (?1 IS NULL OR device_id=?1) AND at >= ?2 ORDER BY at DESC LIMIT ?3",
@@ -551,14 +657,27 @@ impl Store {
     pub fn purge_device(&mut self, device: &str) -> Result<usize> {
         let tx = self.conn.transaction()?;
         let mut n = tx.execute("DELETE FROM ble_windows WHERE device_id=?1", [device])?;
-        n += tx.execute("DELETE FROM location_transitions WHERE device_id=?1", [device])?;
+        n += tx.execute(
+            "DELETE FROM location_transitions WHERE device_id=?1",
+            [device],
+        )?;
         n += tx.execute("DELETE FROM location_state WHERE device_id=?1", [device])?;
-        n += tx.execute("DELETE FROM calibration_sessions WHERE device_id=?1", [device])?;
+        n += tx.execute(
+            "DELETE FROM calibration_sessions WHERE device_id=?1",
+            [device],
+        )?;
         tx.commit()?;
         Ok(n)
     }
 
-    pub fn audit(&mut self, at: UnixMs, actor: &str, action: &str, target: Option<&str>, detail: &serde_json::Value) -> Result<()> {
+    pub fn audit(
+        &mut self,
+        at: UnixMs,
+        actor: &str,
+        action: &str,
+        target: Option<&str>,
+        detail: &serde_json::Value,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT INTO audit_events (at, actor, action, target, detail) VALUES (?1,?2,?3,?4,?5)",
             params![at, actor, action, target, detail.to_string()],
@@ -567,7 +686,9 @@ impl Store {
     }
 
     pub fn audit_list(&self, limit: usize) -> Result<Vec<serde_json::Value>> {
-        let mut st = self.conn.prepare("SELECT at, actor, action, target, detail FROM audit_events ORDER BY id DESC LIMIT ?1")?;
+        let mut st = self.conn.prepare(
+            "SELECT at, actor, action, target, detail FROM audit_events ORDER BY id DESC LIMIT ?1",
+        )?;
         let rows = st.query_map([limit as i64], |r| {
             Ok(serde_json::json!({"at": r.get::<_, i64>(0)?, "actor": r.get::<_, String>(1)?, "action": r.get::<_, String>(2)?,
                 "target": r.get::<_, Option<String>>(3)?, "detail": serde_json::from_str::<serde_json::Value>(&r.get::<_, String>(4)?).unwrap_or_default()}))
@@ -575,9 +696,19 @@ impl Store {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
-    pub fn save_config_revision(&mut self, at: UnixMs, actor: &str, sha256: &str, yaml: &str) -> Result<i64> {
+    pub fn save_config_revision(
+        &mut self,
+        at: UnixMs,
+        actor: &str,
+        sha256: &str,
+        yaml: &str,
+    ) -> Result<i64> {
         let tx = self.conn.transaction()?;
-        let next: i64 = tx.query_row("SELECT coalesce(max(revision),0)+1 FROM config_revisions", [], |r| r.get(0))?;
+        let next: i64 = tx.query_row(
+            "SELECT coalesce(max(revision),0)+1 FROM config_revisions",
+            [],
+            |r| r.get(0),
+        )?;
         tx.execute("UPDATE config_revisions SET active=0", [])?;
         tx.execute(
             "INSERT INTO config_revisions (revision, at, actor, sha256, yaml, active) VALUES (?1,?2,?3,?4,?5,1)",
@@ -590,12 +721,20 @@ impl Store {
     pub fn active_config_revision(&self) -> Result<Option<(i64, String)>> {
         Ok(self
             .conn
-            .query_row("SELECT revision, sha256 FROM config_revisions WHERE active=1", [], |r| Ok((r.get(0)?, r.get(1)?)))
+            .query_row(
+                "SELECT revision, sha256 FROM config_revisions WHERE active=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
             .optional()?)
     }
 
     pub fn counts(&self) -> Result<serde_json::Value> {
-        let c = |t: &str| -> Result<i64> { Ok(self.conn.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))?) };
+        let c = |t: &str| -> Result<i64> {
+            Ok(self
+                .conn
+                .query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0))?)
+        };
         Ok(serde_json::json!({
             "batches": c("batches")?, "probe_results": c("probe_results")?, "wifi_samples": c("wifi_samples")?,
             "lifecycle_events": c("lifecycle_events")?, "node_health": c("node_health")?, "ble_windows": c("ble_windows")?,
@@ -612,7 +751,12 @@ impl Store {
     // ------------------------------------------------------------ maintenance
 
     /// Apply retention in bounded transactions (at most `batch` rows per table per call).
-    pub fn retention(&mut self, now: UnixMs, r: &Retention, batch: usize) -> Result<RetentionReport> {
+    pub fn retention(
+        &mut self,
+        now: UnixMs,
+        r: &Retention,
+        batch: usize,
+    ) -> Result<RetentionReport> {
         let day = 86_400_000i64;
         let b = batch as i64;
         let mut rep = RetentionReport::default();
@@ -648,7 +792,11 @@ impl Store {
         let cutoff = now - now.rem_euclid(3_600_000) - 3_600_000;
         let tx = self.conn.transaction()?;
         let done: i64 = tx
-            .query_row("SELECT value FROM kv WHERE key='rollup_hour_done'", [], |r| r.get::<_, String>(0))
+            .query_row(
+                "SELECT value FROM kv WHERE key='rollup_hour_done'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
             .optional()?
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
@@ -656,14 +804,35 @@ impl Store {
             "SELECT target_id, vantage, bucket_start, samples, eligible, successes, timeouts, other_failures, skipped, dns_bad, rtt_sum_us, rtt_min_us, rtt_max_us, hist
              FROM rollups WHERE resolution_s=60 AND bucket_start >= ?1 AND bucket_start < ?2",
         )?;
-        type Agg = (i64, i64, i64, i64, i64, i64, i64, i64, Option<i64>, Option<i64>, LogHistogram);
+        type Agg = (
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            Option<i64>,
+            Option<i64>,
+            LogHistogram,
+        );
         let mut agg: std::collections::BTreeMap<(String, String, i64), Agg> = Default::default();
         let rows = st.query_map(params![done, cutoff], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, i64>(2)?,
-                [r.get::<_, i64>(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?],
+                [
+                    r.get::<_, i64>(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                    r.get(7)?,
+                    r.get(8)?,
+                    r.get(9)?,
+                    r.get(10)?,
+                ],
                 r.get::<_, Option<i64>>(11)?,
                 r.get::<_, Option<i64>>(12)?,
                 r.get::<_, String>(13)?,
@@ -672,7 +841,19 @@ impl Store {
         for row in rows {
             let (t, v, b, n, mn, mx, h) = row?;
             let hb = b - b.rem_euclid(3_600_000);
-            let e = agg.entry((t, v, hb)).or_insert((0, 0, 0, 0, 0, 0, 0, 0, None, None, LogHistogram::default()));
+            let e = agg.entry((t, v, hb)).or_insert((
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                LogHistogram::default(),
+            ));
             e.0 += n[0];
             e.1 += n[1];
             e.2 += n[2];
@@ -714,11 +895,14 @@ impl Store {
     }
 
     pub fn integrity_check(&self) -> Result<String> {
-        Ok(self.conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?)
+        Ok(self
+            .conn
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))?)
     }
 
     pub fn checkpoint(&self) -> Result<()> {
-        self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        self.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
     }
 
@@ -873,7 +1057,10 @@ fn update_rollup(tx: &Transaction<'_>, vantage: &str, at: UnixMs, p: &ProbeObs) 
             |r| r.get(0),
         )
         .optional()?;
-    let mut h: LogHistogram = existing.as_deref().and_then(|s| serde_json::from_str(s).ok()).unwrap_or_default();
+    let mut h: LogHistogram = existing
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
     if let Some(r) = p.rtt_us {
         h.add(r);
     }

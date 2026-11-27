@@ -1,7 +1,12 @@
 //! Golden vectors shared with the C++ firmware codec (`firmware/test/test_codec.cpp`).
 //! Regenerate deliberately with `UPDATE_GOLDEN=1 cargo test -p ho-protocol --test golden`;
 //! a diff in these files is a wire-format change and needs a schema review.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use ho_protocol::*;
 use std::path::PathBuf;
@@ -34,8 +39,16 @@ fn build(h: Header<'_>, recs: &[Record<'_>]) -> Vec<u8> {
 
 pub fn vectors() -> Vec<(&'static str, Vec<u8>)> {
     let ap = [
-        ApEntry { bssid: MAC_A, channel: 1, rssi_dbm: -58 },
-        ApEntry { bssid: MAC_B, channel: 6, rssi_dbm: -77 },
+        ApEntry {
+            bssid: MAC_A,
+            channel: 1,
+            rssi_dbm: -58,
+        },
+        ApEntry {
+            bssid: MAC_B,
+            channel: 6,
+            rssi_dbm: -77,
+        },
     ];
     let mut counts = [0u8; 14];
     counts[0] = 9;
@@ -77,7 +90,12 @@ pub fn vectors() -> Vec<(&'static str, Vec<u8>)> {
                         dscp: 0,
                         sched_late_ms: 0,
                         error_code: -1,
-                        dns: Some(DnsDetail { rcode: 0, answer: DnsAnswer::NoAnswer, transport: 0, qtype: 1 }),
+                        dns: Some(DnsDetail {
+                            rcode: 0,
+                            answer: DnsAnswer::NoAnswer,
+                            transport: 0,
+                            qtype: 1,
+                        }),
                     }),
                     Record::System(System {
                         age_ms: 0,
@@ -161,14 +179,21 @@ pub fn vectors() -> Vec<(&'static str, Vec<u8>)> {
                         max_tracked_bssids: 16,
                         max_ble_devices: 0,
                     }),
-                    Record::NodeStatus(NodeStatus { online: true, reason: 0, uptime_s: 12 }),
+                    Record::NodeStatus(NodeStatus {
+                        online: true,
+                        reason: 0,
+                        uptime_s: 12,
+                    }),
                 ],
             ),
         ),
         (
             "config_desired",
             build(
-                Header { boot_id: [0; 16], ..header(MsgKind::ConfigDesired, 0, 9) },
+                Header {
+                    boot_id: [0; 16],
+                    ..header(MsgKind::ConfigDesired, 0, 9)
+                },
                 &[
                     Record::ConfigParams(ConfigParams {
                         revision: 7,
@@ -220,8 +245,14 @@ pub fn vectors() -> Vec<(&'static str, Vec<u8>)> {
         (
             "ack",
             build(
-                Header { boot_id: [0; 16], ..header(MsgKind::Ack, 0, 10) },
-                &[Record::Ack(Ack { boot_id: BOOT, sequence: 43 })],
+                Header {
+                    boot_id: [0; 16],
+                    ..header(MsgKind::Ack, 0, 10)
+                },
+                &[Record::Ack(Ack {
+                    boot_id: BOOT,
+                    sequence: 43,
+                })],
             ),
         ),
         (

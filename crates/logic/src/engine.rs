@@ -6,7 +6,8 @@
 
 use crate::health::{liveness, TargetHealth};
 use crate::incidents::{
-    correlate, Incident, IncidentEvent, IncidentManager, NodeView, RadioView, RoamView, Snapshot, TargetView, CENTRAL,
+    correlate, Incident, IncidentEvent, IncidentManager, NodeView, RadioView, RoamView, Snapshot,
+    TargetView, CENTRAL,
 };
 use crate::location::{DeviceTracker, LocationEstimate, RoomGraph, RoomModel};
 use crate::stats::WindowStats;
@@ -24,30 +25,62 @@ pub const MAX_TARGETS_PER_VANTAGE: usize = 32;
 pub enum Input {
     Observations(Vec<Observation>),
     /// Broker-delivered status (birth / last will). Accelerates `stale` only.
-    NodeStatus { node: String, online: bool, at: UnixMs },
+    NodeStatus {
+        node: String,
+        online: bool,
+        at: UnixMs,
+    },
     /// Whether the server's own ingestion path (MQTT session) is healthy.
-    Ingestion { ok: bool, at: UnixMs },
+    Ingestion {
+        ok: bool,
+        at: UnixMs,
+    },
     Tick(UnixMs),
-    Maintenance { asset: String, on: bool, at: UnixMs },
+    Maintenance {
+        asset: String,
+        on: bool,
+        at: UnixMs,
+    },
     /// Consent revoked / device deleted: stop tracking and purge live state.
-    RevokeDevice { device_id: String, at: UnixMs },
+    RevokeDevice {
+        device_id: String,
+        at: UnixMs,
+    },
     /// New calibrated model activated by the operator.
     ActivateModel(RoomModel),
-    Acknowledge { incident_id: String, at: UnixMs },
+    Acknowledge {
+        incident_id: String,
+        at: UnixMs,
+    },
 }
 
 /// Effects for the IO layer.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "effect", rename_all = "snake_case")]
 pub enum Effect {
-    NodeLiveness { node: String, liveness: NodeLiveness, at: UnixMs },
-    TargetHealth { vantage: String, target: String, health: Health, reason: String, at: UnixMs },
+    NodeLiveness {
+        node: String,
+        liveness: NodeLiveness,
+        at: UnixMs,
+    },
+    TargetHealth {
+        vantage: String,
+        target: String,
+        health: Health,
+        reason: String,
+        at: UnixMs,
+    },
     Incident(IncidentEvent),
     Notify(Notification),
     Location(LocationEstimate),
-    LocationPurged { device_id: String, at: UnixMs },
+    LocationPurged {
+        device_id: String,
+        at: UnixMs,
+    },
     /// BLE data dropped for a non-enrolled / non-consented / disabled device.
-    BleDiscarded { count: u32 },
+    BleDiscarded {
+        count: u32,
+    },
 }
 
 /// A notification request; delivered via the durable outbox with dedup key
@@ -157,8 +190,16 @@ impl Engine {
 
     pub fn with_incident_counter(cfg: SiteConfig, counter: u64) -> Self {
         let graph = RoomGraph::from_config(&cfg);
-        let bssid_ap = cfg.radios.iter().map(|r| (r.bssid.to_lowercase(), r.ap.to_string())).collect();
-        let nodes = cfg.nodes.iter().map(|n| (n.id.to_string(), NodeState::default())).collect();
+        let bssid_ap = cfg
+            .radios
+            .iter()
+            .map(|r| (r.bssid.to_lowercase(), r.ap.to_string()))
+            .collect();
+        let nodes = cfg
+            .nodes
+            .iter()
+            .map(|n| (n.id.to_string(), NodeState::default()))
+            .collect();
         Self {
             cfg,
             graph,
@@ -217,7 +258,11 @@ impl Engine {
                     n.broker_online = Some(online);
                     if !online && n.liveness == Some(NodeLiveness::Online) {
                         n.liveness = Some(NodeLiveness::Stale);
-                        fx.push(Effect::NodeLiveness { node, liveness: NodeLiveness::Stale, at });
+                        fx.push(Effect::NodeLiveness {
+                            node,
+                            liveness: NodeLiveness::Stale,
+                            at,
+                        });
                     }
                 }
             }
@@ -232,7 +277,11 @@ impl Engine {
                 } else {
                     self.maintenance.remove(&asset);
                 }
-                for t in self.targets.values_mut().filter(|t| t.asset.as_deref() == Some(asset.as_str())) {
+                for t in self
+                    .targets
+                    .values_mut()
+                    .filter(|t| t.asset.as_deref() == Some(asset.as_str()))
+                {
                     t.health.set_maintenance(on, at);
                 }
             }
@@ -256,18 +305,42 @@ impl Engine {
 
     /// Metadata for a configured target, or `None` if the id is not allowed for this
     /// vantage (unknown ids are dropped so node input cannot grow server state).
-    fn target_meta(&self, vantage: &str, target: &str, kind: &str) -> Option<(String, Option<String>, bool)> {
+    fn target_meta(
+        &self,
+        vantage: &str,
+        target: &str,
+        kind: &str,
+    ) -> Option<(String, Option<String>, bool)> {
         if vantage == CENTRAL {
-            let c = self.cfg.central_checks.iter().find(|c| c.id.as_str() == target)?;
-            return Some((kind.to_string(), c.asset.as_ref().map(ToString::to_string), c.critical));
+            let c = self
+                .cfg
+                .central_checks
+                .iter()
+                .find(|c| c.id.as_str() == target)?;
+            return Some((
+                kind.to_string(),
+                c.asset.as_ref().map(ToString::to_string),
+                c.critical,
+            ));
         }
-        if let Some(t) = self.cfg.probe_targets.iter().find(|t| t.id.as_str() == target) {
+        if let Some(t) = self
+            .cfg
+            .probe_targets
+            .iter()
+            .find(|t| t.id.as_str() == target)
+        {
             if !t.nodes.is_empty() && !t.nodes.iter().any(|n| n.as_str() == vantage) {
                 return None;
             }
-            return Some((kind.to_string(), t.asset.as_ref().map(ToString::to_string), t.critical));
+            return Some((
+                kind.to_string(),
+                t.asset.as_ref().map(ToString::to_string),
+                t.critical,
+            ));
         }
-        BUILTIN_NODE_TARGETS.contains(&target).then(|| (kind.to_string(), None, false))
+        BUILTIN_NODE_TARGETS
+            .contains(&target)
+            .then(|| (kind.to_string(), None, false))
     }
 
     fn ap_of(&self, bssid: &str) -> Option<String> {
@@ -278,9 +351,17 @@ impl Engine {
         let src = o.prov.source.clone();
         let t = o.time.observed_at;
         if src != CENTRAL {
-            let expected_ap = self.cfg.node(&src).and_then(|n| n.expected_ap.as_ref().map(ToString::to_string));
-            let Some(n) = self.nodes.get_mut(&src) else { return };
-            n.last_seen = Some(n.last_seen.map_or(o.time.received_at, |l| l.max(o.time.received_at)));
+            let expected_ap = self
+                .cfg
+                .node(&src)
+                .and_then(|n| n.expected_ap.as_ref().map(ToString::to_string));
+            let Some(n) = self.nodes.get_mut(&src) else {
+                return;
+            };
+            n.last_seen = Some(
+                n.last_seen
+                    .map_or(o.time.received_at, |l| l.max(o.time.received_at)),
+            );
             if n.boot_id.as_deref() != Some(o.prov.boot_id.as_str()) {
                 n.boot_id = Some(o.prov.boot_id.clone());
             }
@@ -289,18 +370,24 @@ impl Engine {
             }
             if n.liveness != Some(NodeLiveness::Online) && self.ingestion_ok {
                 n.liveness = Some(NodeLiveness::Online);
-                fx.push(Effect::NodeLiveness { node: src.clone(), liveness: NodeLiveness::Online, at: o.time.received_at });
+                fx.push(Effect::NodeLiveness {
+                    node: src.clone(),
+                    liveness: NodeLiveness::Online,
+                    at: o.time.received_at,
+                });
             }
         }
         match o.kind {
             ObsKind::Probe(p) => {
-                let Some((kind, asset, critical)) = self.target_meta(&src, &p.target_id, &p.kind) else {
+                let Some((kind, asset, critical)) = self.target_meta(&src, &p.target_id, &p.kind)
+                else {
                     self.unknown_targets += 1;
                     return;
                 };
                 let key = (src.clone(), p.target_id.clone());
                 if !self.targets.contains_key(&key)
-                    && self.targets.keys().filter(|(v, _)| *v == src).count() >= MAX_TARGETS_PER_VANTAGE
+                    && self.targets.keys().filter(|(v, _)| *v == src).count()
+                        >= MAX_TARGETS_PER_VANTAGE
                 {
                     self.unknown_targets += 1;
                     return;
@@ -313,12 +400,27 @@ impl Engine {
                     critical,
                     health: TargetHealth::new(window, is_dns),
                 });
-                if asset.as_ref().is_some_and(|a| self.maintenance.contains(a)) && e.health.health != Health::Maintenance {
+                if asset.as_ref().is_some_and(|a| self.maintenance.contains(a))
+                    && e.health.health != Health::Maintenance
+                {
                     e.health.set_maintenance(true, t);
                 }
                 let dns_good = p.dns.as_ref().map(DnsInfo::is_good).filter(|_| is_dns);
-                if let Some(ch) = e.health.record(t, p.outcome, p.rtt_us, dns_good, p.scan_overlap, &self.cfg.thresholds) {
-                    fx.push(Effect::TargetHealth { vantage: src, target: p.target_id, health: ch.to, reason: ch.reason, at: t });
+                if let Some(ch) = e.health.record(
+                    t,
+                    p.outcome,
+                    p.rtt_us,
+                    dns_good,
+                    p.scan_overlap,
+                    &self.cfg.thresholds,
+                ) {
+                    fx.push(Effect::TargetHealth {
+                        vantage: src,
+                        target: p.target_id,
+                        health: ch.to,
+                        reason: ch.reason,
+                        at: t,
+                    });
                 }
             }
             ObsKind::Wifi(w) => {
@@ -326,7 +428,12 @@ impl Engine {
                 if let Some(n) = self.nodes.get_mut(&src) {
                     if let (Some(prev_ap), Some(next_ap)) = (n.ap.clone(), new_ap.clone()) {
                         if prev_ap != next_ap {
-                            self.roams.push_back(RoamView { node: src.clone(), from_ap: prev_ap, to_ap: Some(next_ap), at: t });
+                            self.roams.push_back(RoamView {
+                                node: src.clone(),
+                                from_ap: prev_ap,
+                                to_ap: Some(next_ap),
+                                at: t,
+                            });
                         }
                     }
                     n.bssid = w.bssid.clone().or(n.bssid.take());
@@ -343,7 +450,12 @@ impl Engine {
                     let to = l.new_bssid.as_deref().and_then(|b| self.ap_of(b));
                     if let Some(from) = from {
                         if to.as_ref() != Some(&from) {
-                            self.roams.push_back(RoamView { node: src.clone(), from_ap: from, to_ap: to.clone(), at: t });
+                            self.roams.push_back(RoamView {
+                                node: src.clone(),
+                                from_ap: from,
+                                to_ap: to.clone(),
+                                at: t,
+                            });
                             if let Some(n) = self.nodes.get_mut(&src) {
                                 n.ap = to.or(n.ap.take());
                             }
@@ -363,7 +475,11 @@ impl Engine {
                 if let Some(n) = self.nodes.get_mut(&src) {
                     n.last_scan_at = Some(t);
                 }
-                let seen_aps: BTreeSet<String> = s.samples.iter().filter_map(|x| self.ap_of(&x.bssid)).collect();
+                let seen_aps: BTreeSet<String> = s
+                    .samples
+                    .iter()
+                    .filter_map(|x| self.ap_of(&x.bssid))
+                    .collect();
                 let aps: BTreeSet<String> = self.bssid_ap.values().cloned().collect();
                 for ap in aps {
                     let tr = self.radios.entry(ap.clone()).or_default();
@@ -385,7 +501,11 @@ impl Engine {
     }
 
     fn observe_ble(&mut self, node: &str, t: UnixMs, b: &BleObs, fx: &mut Vec<Effect>) {
-        let enrolled = self.cfg.devices.iter().find(|d| d.id.as_str() == b.device_id);
+        let enrolled = self
+            .cfg
+            .devices
+            .iter()
+            .find(|d| d.id.as_str() == b.device_id);
         let allowed = self.cfg.privacy.location_enabled
             && enrolled.is_some_and(|d| d.consent)
             && !self.revoked.contains(&b.device_id);
@@ -396,8 +516,17 @@ impl Engine {
             return;
         }
         let th = self.cfg.thresholds.location.clone();
-        let tr = self.devices.entry(b.device_id.clone()).or_insert_with(|| DeviceTracker::new(&b.device_id));
-        tr.observe(node, t, b.rssi_mean, f64::from(b.coverage_permille) / 1000.0, &th);
+        let tr = self
+            .devices
+            .entry(b.device_id.clone())
+            .or_insert_with(|| DeviceTracker::new(&b.device_id));
+        tr.observe(
+            node,
+            t,
+            b.rssi_mean,
+            f64::from(b.coverage_permille) / 1000.0,
+            &th,
+        );
     }
 
     fn tick(&mut self, now: UnixMs, fx: &mut Vec<Effect>) {
@@ -408,13 +537,23 @@ impl Engine {
             let l = liveness(n.last_seen, now, th.node_missing_ms, self.ingestion_ok);
             if n.liveness != Some(l) && !(n.liveness.is_none() && l == NodeLiveness::Unknown) {
                 n.liveness = Some(l);
-                fx.push(Effect::NodeLiveness { node: id.clone(), liveness: l, at: now });
+                fx.push(Effect::NodeLiveness {
+                    node: id.clone(),
+                    liveness: l,
+                    at: now,
+                });
             }
         }
         // 2. Target staleness / recovery timers.
         for ((v, t), e) in self.targets.iter_mut() {
             if let Some(ch) = e.health.evaluate(now, &th) {
-                fx.push(Effect::TargetHealth { vantage: v.clone(), target: t.clone(), health: ch.to, reason: ch.reason, at: now });
+                fx.push(Effect::TargetHealth {
+                    vantage: v.clone(),
+                    target: t.clone(),
+                    health: ch.to,
+                    reason: ch.reason,
+                    at: now,
+                });
             }
         }
         // 3. Correlate.
@@ -425,7 +564,11 @@ impl Engine {
         let nodes: Vec<NodeView> = self
             .nodes
             .iter()
-            .map(|(id, n)| NodeView { id: id.clone(), liveness: n.liveness.unwrap_or(NodeLiveness::Unknown), ap: n.ap.clone() })
+            .map(|(id, n)| NodeView {
+                id: id.clone(),
+                liveness: n.liveness.unwrap_or(NodeLiveness::Unknown),
+                ap: n.ap.clone(),
+            })
             .collect();
         let targets: Vec<TargetView> = self
             .targets
@@ -445,7 +588,10 @@ impl Engine {
             .radios
             .iter()
             .map(|(ap, tr)| {
-                let mut rv = RadioView { ap: ap.clone(), ..Default::default() };
+                let mut rv = RadioView {
+                    ap: ap.clone(),
+                    ..Default::default()
+                };
                 for (node, (t, saw)) in &tr.last {
                     if now - t > radio_recent {
                         continue;
@@ -472,7 +618,12 @@ impl Engine {
         for ev in self.incidents.reconcile(hyps, now, &th) {
             if ev.kind.notifies() {
                 let inc = self.incidents.incidents.get(&ev.key);
-                let suppressed = inc.is_some_and(|i| i.hypothesis.scope_assets.iter().any(|a| self.maintenance.contains(a)));
+                let suppressed = inc.is_some_and(|i| {
+                    i.hypothesis
+                        .scope_assets
+                        .iter()
+                        .any(|a| self.maintenance.contains(a))
+                });
                 fx.push(Effect::Notify(Notification {
                     incident_id: ev.incident_id.clone(),
                     event: ev.kind.as_str().into(),
@@ -517,7 +668,10 @@ impl Engine {
                     id: id.clone(),
                     liveness: n.liveness.unwrap_or(NodeLiveness::Unknown),
                     state: n.clone(),
-                    room: self.cfg.node(id).and_then(|c| c.room.as_ref().map(ToString::to_string)),
+                    room: self
+                        .cfg
+                        .node(id)
+                        .and_then(|c| c.room.as_ref().map(ToString::to_string)),
                 })
                 .collect(),
             targets: self
@@ -557,9 +711,16 @@ pub fn render_body(i: &Incident, ev: &IncidentEvent) -> String {
     };
     s.push_str(&format!("{sev} [{}] {}\n", ev.kind.as_str(), h.title));
     if !h.affected_nodes.is_empty() {
-        s.push_str(&format!("Impact: {} node(s): {}\n", h.affected_nodes.len(), h.affected_nodes.join(", ")));
+        s.push_str(&format!(
+            "Impact: {} node(s): {}\n",
+            h.affected_nodes.len(),
+            h.affected_nodes.join(", ")
+        ));
     }
-    s.push_str(&format!("Hypothesis: {} (confidence: {:?})\n", h.cause, h.confidence));
+    s.push_str(&format!(
+        "Hypothesis: {} (confidence: {:?})\n",
+        h.cause, h.confidence
+    ));
     for e in h.evidence.iter().take(4) {
         s.push_str(&format!("Evidence: {e}\n"));
     }

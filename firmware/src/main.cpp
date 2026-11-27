@@ -470,6 +470,12 @@ void finish_probe(Slot& s, Outcome o, uint32_t rtt_us, int16_t err, const DnsDet
 
 void start_probe(uint8_t ti, uint16_t late) {
   const ProbeTargetRec& t = g_cfg.targets[ti];
+  if (g_scan_running) {
+    // Never measure the path while our own radio is off-channel: report the skip.
+    Slot tmp{true, ti, millis(), micros(), 0, late, true, 0, 0, 0, IPAddress()};
+    finish_probe(tmp, Outcome::SkippedDeferred, 0, 12, nullptr);
+    return;
+  }
   Slot* s = nullptr;
   uint8_t inflight = 0;
   for (auto& x : g_slots) if (x.active) inflight++; else if (!s) s = &x;
@@ -850,7 +856,8 @@ void loop() {
 
   mqtt_tick(now);
   uint16_t late = 0;
-  if (g_p_link.poll(now)) sample_link(now);
+  // Radio coordination: the channel/RSSI are meaningless while scanning off-channel.
+  if (g_p_link.poll(now) && !g_scan_running) sample_link(now);
   if (g_p_heartbeat.poll(now)) g_send_heartbeat = true;
   if (g_p_health.poll(now)) g_send_health = true;
   maybe_scan(now);

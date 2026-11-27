@@ -106,7 +106,11 @@ fn entities(cfg: &SiteConfig) -> Vec<Entity> {
             icon: None,
         });
     }
-    for a in cfg.assets.iter().filter(|a| a.kind == ho_domain::AssetKind::AccessPoint) {
+    for a in cfg
+        .assets
+        .iter()
+        .filter(|a| a.kind == ho_domain::AssetKind::AccessPoint)
+    {
         let id = a.id.as_str().replace('-', "_");
         v.push(Entity {
             component: "binary_sensor",
@@ -212,10 +216,22 @@ pub fn removal(cfg: &SiteConfig, object_ids: &[String]) -> Vec<Publish> {
     for oid in object_ids {
         let uid = format!("observatory_{}_{oid}", cfg.site_id);
         for comp in ["sensor", "binary_sensor"] {
-            v.push(Publish { topic: format!("{}/{comp}/{uid}/config", ha.discovery_prefix), payload: String::new(), retain: true });
+            v.push(Publish {
+                topic: format!("{}/{comp}/{uid}/config", ha.discovery_prefix),
+                payload: String::new(),
+                retain: true,
+            });
         }
-        v.push(Publish { topic: state_topic(ha, oid), payload: String::new(), retain: true });
-        v.push(Publish { topic: avail_topic(ha, oid), payload: String::new(), retain: true });
+        v.push(Publish {
+            topic: state_topic(ha, oid),
+            payload: String::new(),
+            retain: true,
+        });
+        v.push(Publish {
+            topic: avail_topic(ha, oid),
+            payload: String::new(),
+            retain: true,
+        });
     }
     v
 }
@@ -239,36 +255,76 @@ pub fn states(cfg: &SiteConfig, snap: &EngineSnapshot, score: &Score) -> Vec<Pub
     let ha = &cfg.home_assistant;
     let mut out = Vec::new();
     let mut put = |oid: &str, v: Option<String>| {
-        out.push(Publish { topic: avail_topic(ha, oid), payload: if v.is_some() { "online" } else { "offline" }.into(), retain: true });
+        out.push(Publish {
+            topic: avail_topic(ha, oid),
+            payload: if v.is_some() { "online" } else { "offline" }.into(),
+            retain: true,
+        });
         if let Some(v) = v {
-            out.push(Publish { topic: state_topic(ha, oid), payload: v, retain: true });
+            out.push(Publish {
+                topic: state_topic(ha, oid),
+                payload: v,
+                retain: true,
+            });
         }
     };
-    let dns: Vec<_> = snap.targets.iter().filter(|t| t.kind == "dns" && t.stats.successes >= 3).collect();
-    let dns_p95 = dns.iter().filter_map(|t| t.stats.p95_ms).fold(None, |a: Option<f64>, x| Some(a.map_or(x, |y| y.max(x))));
+    let dns: Vec<_> = snap
+        .targets
+        .iter()
+        .filter(|t| t.kind == "dns" && t.stats.successes >= 3)
+        .collect();
+    let dns_p95 = dns
+        .iter()
+        .filter_map(|t| t.stats.p95_ms)
+        .fold(None, |a: Option<f64>, x| Some(a.map_or(x, |y| y.max(x))));
     put("network_dns_p95_latency", val(dns_p95));
-    let wl: Vec<_> = snap.targets.iter().filter(|t| t.vantage != "central" && t.kind == "icmp" && t.stats.successes >= 5).collect();
-    let wl_p95 = wl.iter().filter_map(|t| t.stats.p95_ms).fold(None, |a: Option<f64>, x| Some(a.map_or(x, |y| y.max(x))));
+    let wl: Vec<_> = snap
+        .targets
+        .iter()
+        .filter(|t| t.vantage != "central" && t.kind == "icmp" && t.stats.successes >= 5)
+        .collect();
+    let wl_p95 = wl
+        .iter()
+        .filter_map(|t| t.stats.p95_ms)
+        .fold(None, |a: Option<f64>, x| Some(a.map_or(x, |y| y.max(x))));
     put("network_wireless_p95_latency", val(wl_p95));
     let (mut to, mut el) = (0u32, 0u32);
-    for t in snap.targets.iter().filter(|t| t.kind == "icmp" || t.kind == "udp_echo") {
+    for t in snap
+        .targets
+        .iter()
+        .filter(|t| t.kind == "icmp" || t.kind == "udp_echo")
+    {
         to += t.stats.timeouts;
         el += t.stats.eligible;
     }
-    put("network_packet_loss", (el >= 20).then(|| format!("{:.2}", f64::from(to) * 100.0 / f64::from(el))));
+    put(
+        "network_packet_loss",
+        (el >= 20).then(|| format!("{:.2}", f64::from(to) * 100.0 / f64::from(el))),
+    );
     put("network_health_score", val(score.value));
     let congested = snap.incidents.iter().any(|i| {
         i.status != ho_logic::incidents::IncidentStatus::Resolved
             && matches!(
                 i.hypothesis.kind,
-                ho_logic::incidents::HypKind::WirelessPathDegraded | ho_logic::incidents::HypKind::SharedLanCongestion
+                ho_logic::incidents::HypKind::WirelessPathDegraded
+                    | ho_logic::incidents::HypKind::SharedLanCongestion
             )
     });
-    put("network_congested", Some(if congested { "ON" } else { "OFF" }.into()));
+    put(
+        "network_congested",
+        Some(if congested { "ON" } else { "OFF" }.into()),
+    );
     let dns_ok = if dns.is_empty() {
         None
     } else {
-        Some(if dns.iter().all(|t| !t.health.is_bad()) { "ON" } else { "OFF" }.to_string())
+        Some(
+            if dns.iter().all(|t| !t.health.is_bad()) {
+                "ON"
+            } else {
+                "OFF"
+            }
+            .to_string(),
+        )
     };
     put("dns_available", dns_ok);
     for n in &snap.nodes {
@@ -280,17 +336,35 @@ pub fn states(cfg: &SiteConfig, snap: &EngineSnapshot, score: &Score) -> Vec<Pub
         };
         put(&format!("{id}_online"), online);
         let fresh = n.liveness == NodeLiveness::Online;
-        put(&format!("{id}_wifi_rssi"), n.state.rssi_dbm.filter(|_| fresh).map(|r| r.to_string()));
+        put(
+            &format!("{id}_wifi_rssi"),
+            n.state.rssi_dbm.filter(|_| fresh).map(|r| r.to_string()),
+        );
     }
-    for a in cfg.assets.iter().filter(|a| a.kind == ho_domain::AssetKind::AccessPoint) {
+    for a in cfg
+        .assets
+        .iter()
+        .filter(|a| a.kind == ho_domain::AssetKind::AccessPoint)
+    {
         let id = a.id.as_str().replace('-', "_");
         let down = snap.incidents.iter().any(|i| {
             i.status != ho_logic::incidents::IncidentStatus::Resolved
                 && i.hypothesis.scope_assets.iter().any(|s| s == a.id.as_str())
-                && matches!(i.hypothesis.kind, ho_logic::incidents::HypKind::ApUnavailable | ho_logic::incidents::HypKind::ApRadioIssue)
+                && matches!(
+                    i.hypothesis.kind,
+                    ho_logic::incidents::HypKind::ApUnavailable
+                        | ho_logic::incidents::HypKind::ApRadioIssue
+                )
         });
-        let known = snap.targets.iter().any(|t| t.asset.as_deref() == Some(a.id.as_str())) || down;
-        put(&format!("{id}_available"), known.then(|| if down { "OFF" } else { "ON" }.to_string()));
+        let known = snap
+            .targets
+            .iter()
+            .any(|t| t.asset.as_deref() == Some(a.id.as_str()))
+            || down;
+        put(
+            &format!("{id}_available"),
+            known.then(|| if down { "OFF" } else { "ON" }.to_string()),
+        );
     }
     if cfg.privacy.location_enabled && cfg.privacy.publish_location_to_ha {
         for d in cfg.devices.iter().filter(|d| d.consent) {
@@ -298,15 +372,21 @@ pub fn states(cfg: &SiteConfig, snap: &EngineSnapshot, score: &Score) -> Vec<Pub
             let est = snap.locations.iter().find(|l| l.device_id == d.id.as_str());
             // Stale or unknown rooms are never published as current.
             let fresh = est.filter(|e| e.state == LocationState::Located);
-            put(&format!("device_{id}_current_room"), fresh.and_then(|e| e.room_id.clone()));
-            put(&format!("device_{id}_location_confidence"), fresh.map(|e| format!("{:.0}", e.confidence * 100.0)));
+            put(
+                &format!("device_{id}_current_room"),
+                fresh.and_then(|e| e.room_id.clone()),
+            );
+            put(
+                &format!("device_{id}_location_confidence"),
+                fresh.map(|e| format!("{:.0}", e.confidence * 100.0)),
+            );
         }
     }
     out
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use ho_logic::engine::Engine;
@@ -332,13 +412,21 @@ home_assistant: {{enabled: true}}
         let c = cfg(false);
         let d = discovery(&c);
         assert!(d.iter().all(|p| p.retain));
-        let node = d.iter().find(|p| p.topic.contains("node_01_online")).unwrap();
+        let node = d
+            .iter()
+            .find(|p| p.topic.contains("node_01_online"))
+            .unwrap();
         let v: serde_json::Value = serde_json::from_str(&node.payload).unwrap();
         assert_eq!(v["unique_id"], "observatory_home_node_01_online");
         assert_eq!(v["availability"].as_array().unwrap().len(), 2);
-        assert!(!d.iter().any(|p| p.topic.contains("current_room")), "no location entities unless opted in");
+        assert!(
+            !d.iter().any(|p| p.topic.contains("current_room")),
+            "no location entities unless opted in"
+        );
         let d2 = discovery(&cfg(true));
-        assert!(d2.iter().any(|p| p.topic.contains("device_phone_1_current_room")));
+        assert!(d2
+            .iter()
+            .any(|p| p.topic.contains("device_phone_1_current_room")));
         assert_eq!(discovery(&c), discovery(&c), "deterministic");
     }
 
@@ -349,10 +437,21 @@ home_assistant: {{enabled: true}}
         let snap = e.snapshot();
         let score = ho_logic::recommend::score(&snap, 20);
         let s = states(&c, &snap, &score);
-        let loss_av = s.iter().find(|p| p.topic.ends_with("network_packet_loss/availability")).unwrap();
+        let loss_av = s
+            .iter()
+            .find(|p| p.topic.ends_with("network_packet_loss/availability"))
+            .unwrap();
         assert_eq!(loss_av.payload, "offline");
-        assert!(!s.iter().any(|p| p.topic.ends_with("network_packet_loss/state")));
-        let room = s.iter().find(|p| p.topic.ends_with("device_phone_1_current_room/availability")).unwrap();
+        assert!(!s
+            .iter()
+            .any(|p| p.topic.ends_with("network_packet_loss/state")));
+        let room = s
+            .iter()
+            .find(|p| {
+                p.topic
+                    .ends_with("device_phone_1_current_room/availability")
+            })
+            .unwrap();
         assert_eq!(room.payload, "offline");
     }
 

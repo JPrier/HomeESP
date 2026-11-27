@@ -57,8 +57,17 @@ pub fn normalize(frame: &p::Frame<'_>, ctx: &FrameCtx<'_>) -> Vec<Observation> {
         let mk = |age: u32, kind: ObsKind| {
             let m = ctx.clock.map(h.sent_mono_ms, age, ctx.received_at);
             Observation {
-                prov: Provenance { source: h.node_id.to_string(), boot_id: boot.clone(), sequence: h.sequence, index },
-                time: EventTime { observed_at: m.observed_at, uncertainty_ms: m.uncertainty_ms, received_at: ctx.received_at },
+                prov: Provenance {
+                    source: h.node_id.to_string(),
+                    boot_id: boot.clone(),
+                    sequence: h.sequence,
+                    index,
+                },
+                time: EventTime {
+                    observed_at: m.observed_at,
+                    uncertainty_ms: m.uncertainty_ms,
+                    received_at: ctx.received_at,
+                },
                 kind,
             }
         };
@@ -92,7 +101,11 @@ pub fn normalize(frame: &p::Frame<'_>, ctx: &FrameCtx<'_>) -> Vec<Observation> {
                     dns: pr.dns.map(|d| DnsInfo {
                         rcode: d.rcode,
                         answer: d.answer.as_str().into(),
-                        transport: if d.transport == 1 { "tcp".into() } else { "udp".into() },
+                        transport: if d.transport == 1 {
+                            "tcp".into()
+                        } else {
+                            "udp".into()
+                        },
                         qtype: d.qtype,
                     }),
                     via_bssid: via.clone(),
@@ -113,7 +126,11 @@ pub fn normalize(frame: &p::Frame<'_>, ctx: &FrameCtx<'_>) -> Vec<Observation> {
                     samples: s
                         .entries
                         .iter()
-                        .map(|e| ApSample { bssid: mac(&e.bssid), channel: e.channel, rssi_dbm: e.rssi_dbm })
+                        .map(|e| ApSample {
+                            bssid: mac(&e.bssid),
+                            channel: e.channel,
+                            rssi_dbm: e.rssi_dbm,
+                        })
                         .collect(),
                 }),
             ),
@@ -172,7 +189,12 @@ pub fn normalize(frame: &p::Frame<'_>, ctx: &FrameCtx<'_>) -> Vec<Observation> {
                     calibration_rev: s.calibration_rev,
                 }),
             ),
-            p::Record::NodeStatus(s) => mk(0, ObsKind::Heartbeat { uptime_s: s.uptime_s }),
+            p::Record::NodeStatus(s) => mk(
+                0,
+                ObsKind::Heartbeat {
+                    uptime_s: s.uptime_s,
+                },
+            ),
             _ => continue,
         };
         out.push(obs);
@@ -224,7 +246,14 @@ mod tests {
         let f = p::decode_frame(&buf[..n]).unwrap();
         let mut clock = OffsetEstimator::default();
         clock.observe([1; 16], 10_000, 1_000_010_000);
-        let obs = normalize(&f, &FrameCtx { received_at: 1_000_010_000, clock: &clock, current_bssid: None });
+        let obs = normalize(
+            &f,
+            &FrameCtx {
+                received_at: 1_000_010_000,
+                clock: &clock,
+                current_bssid: None,
+            },
+        );
         assert_eq!(obs.len(), 2);
         assert_eq!(obs[1].prov.index, 1);
         assert_eq!(obs[1].time.observed_at, 1_000_010_000 - 50);

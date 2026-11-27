@@ -56,20 +56,35 @@ fn priority(s: Severity, event: &str) -> &'static str {
 }
 
 /// Deliver one message. `token` is read from the notifier's token file by the caller.
-pub async fn deliver(n: &NotifierConf, token: Option<&str>, m: &Message) -> Result<(), DeliveryError> {
+pub async fn deliver(
+    n: &NotifierConf,
+    token: Option<&str>,
+    m: &Message,
+) -> Result<(), DeliveryError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_millis(n.timeout_ms.clamp(500, 30_000)))
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| DeliveryError::Permanent(e.to_string()))?;
-    let title = if m.test { format!("[TEST] {}", m.title) } else { m.title.clone() };
+    let title = if m.test {
+        format!("[TEST] {}", m.title)
+    } else {
+        m.title.clone()
+    };
     let req = match n.kind {
         NotifierKind::Ntfy => {
             let mut r = client
                 .post(&n.url)
                 .header("Title", sanitize_header(&title))
                 .header("Priority", priority(m.severity, &m.event))
-                .header("Tags", if m.event == "resolved" { "white_check_mark" } else { "warning" })
+                .header(
+                    "Tags",
+                    if m.event == "resolved" {
+                        "white_check_mark"
+                    } else {
+                        "warning"
+                    },
+                )
                 .body(m.body.clone());
             if let Some(t) = token {
                 r = r.bearer_auth(t);
@@ -93,11 +108,14 @@ pub async fn deliver(n: &NotifierConf, token: Option<&str>, m: &Message) -> Resu
 }
 
 fn sanitize_header(s: &str) -> String {
-    s.chars().filter(|c| c.is_ascii() && !c.is_control()).take(200).collect()
+    s.chars()
+        .filter(|c| c.is_ascii() && !c.is_control())
+        .take(200)
+        .collect()
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -113,9 +131,18 @@ mod tests {
     #[test]
     fn status_classification() {
         assert!(classify_status(204).is_ok());
-        assert!(matches!(classify_status(429), Err(DeliveryError::Transient(_))));
-        assert!(matches!(classify_status(503), Err(DeliveryError::Transient(_))));
-        assert!(matches!(classify_status(403), Err(DeliveryError::Permanent(_))));
+        assert!(matches!(
+            classify_status(429),
+            Err(DeliveryError::Transient(_))
+        ));
+        assert!(matches!(
+            classify_status(503),
+            Err(DeliveryError::Transient(_))
+        ));
+        assert!(matches!(
+            classify_status(403),
+            Err(DeliveryError::Permanent(_))
+        ));
     }
 
     async fn one_shot_server(status: &'static str) -> (String, tokio::task::JoinHandle<String>) {
@@ -125,7 +152,9 @@ mod tests {
             let (mut s, _) = l.accept().await.unwrap();
             let mut buf = vec![0u8; 8192];
             let n = s.read(&mut buf).await.unwrap();
-            s.write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\n\r\n").as_bytes()).await.unwrap();
+            s.write_all(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\n\r\n").as_bytes())
+                .await
+                .unwrap();
             String::from_utf8_lossy(&buf[..n]).to_string()
         });
         (url, h)
@@ -147,7 +176,14 @@ mod tests {
     #[tokio::test]
     async fn ntfy_delivery_sets_headers_and_auth() {
         let (url, h) = one_shot_server("200 OK").await;
-        let n = NotifierConf { id: "n".into(), kind: NotifierKind::Ntfy, url, token_file: None, allow_plain_http_lan: true, timeout_ms: 2000 };
+        let n = NotifierConf {
+            id: "n".into(),
+            kind: NotifierKind::Ntfy,
+            url,
+            token_file: None,
+            allow_plain_http_lan: true,
+            timeout_ms: 2000,
+        };
         deliver(&n, Some("secret-token"), &msg()).await.unwrap();
         let req = h.await.unwrap().to_lowercase();
         assert!(req.contains("title: [test] ap down"), "{req}");
@@ -158,12 +194,25 @@ mod tests {
     #[tokio::test]
     async fn webhook_failure_is_classified() {
         let (url, h) = one_shot_server("500 Internal Server Error").await;
-        let n = NotifierConf { id: "w".into(), kind: NotifierKind::Webhook, url, token_file: None, allow_plain_http_lan: true, timeout_ms: 2000 };
-        assert!(matches!(deliver(&n, None, &msg()).await, Err(DeliveryError::Transient(_))));
+        let n = NotifierConf {
+            id: "w".into(),
+            kind: NotifierKind::Webhook,
+            url,
+            token_file: None,
+            allow_plain_http_lan: true,
+            timeout_ms: 2000,
+        };
+        assert!(matches!(
+            deliver(&n, None, &msg()).await,
+            Err(DeliveryError::Transient(_))
+        ));
         let body = h.await.unwrap();
         assert!(body.contains("\"incident_id\":\"inc-1\""));
         // Unreachable endpoint -> transient, never "delivered".
-        let n2 = NotifierConf { url: "http://127.0.0.1:9/x".into(), ..n };
+        let n2 = NotifierConf {
+            url: "http://127.0.0.1:9/x".into(),
+            ..n
+        };
         assert!(deliver(&n2, None, &msg()).await.is_err());
     }
 }

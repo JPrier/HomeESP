@@ -44,16 +44,24 @@ pub struct LabeledSample {
 pub fn calibrate(samples: &[LabeledSample], revision: u32) -> RoomModel {
     let mut by: BTreeMap<(&str, &str), Vec<f64>> = BTreeMap::new();
     for s in samples.iter().filter(|s| s.rssi.is_finite()) {
-        by.entry((s.room.as_str(), s.node.as_str())).or_default().push(s.rssi);
+        by.entry((s.room.as_str(), s.node.as_str()))
+            .or_default()
+            .push(s.rssi);
     }
-    let mut m = RoomModel { revision, fingerprints: BTreeMap::new() };
+    let mut m = RoomModel {
+        revision,
+        fingerprints: BTreeMap::new(),
+    };
     for ((room, node), v) in by {
         if v.len() < 5 {
             continue; // insufficient samples: leave unknown rather than guess
         }
         if let Some((med, mad)) = crate::stats::median_mad(&v) {
             let sigma = (1.4826 * mad).max(SIGMA_FLOOR);
-            m.fingerprints.entry(room.to_string()).or_default().insert(node.to_string(), (med, sigma));
+            m.fingerprints
+                .entry(room.to_string())
+                .or_default()
+                .insert(node.to_string(), (med, sigma));
         }
     }
     m
@@ -73,13 +81,27 @@ impl RoomGraph {
         let rooms: Vec<String> = cfg.rooms.iter().map(|r| r.id.to_string()).collect();
         let mut neighbors: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for e in &cfg.room_edges {
-            neighbors.entry(e.from.to_string()).or_default().insert(e.to.to_string());
+            neighbors
+                .entry(e.from.to_string())
+                .or_default()
+                .insert(e.to.to_string());
             if e.bidirectional {
-                neighbors.entry(e.to.to_string()).or_default().insert(e.from.to_string());
+                neighbors
+                    .entry(e.to.to_string())
+                    .or_default()
+                    .insert(e.from.to_string());
             }
         }
-        let node_room = cfg.nodes.iter().filter_map(|n| n.room.as_ref().map(|r| (n.id.to_string(), r.to_string()))).collect();
-        Self { rooms, neighbors, node_room }
+        let node_room = cfg
+            .nodes
+            .iter()
+            .filter_map(|n| n.room.as_ref().map(|r| (n.id.to_string(), r.to_string())))
+            .collect();
+        Self {
+            rooms,
+            neighbors,
+            node_room,
+        }
     }
 }
 
@@ -135,7 +157,14 @@ impl DeviceTracker {
     }
 
     /// Feed one per-node window summary (mean RSSI over the window).
-    pub fn observe(&mut self, node: &str, t: UnixMs, mean_rssi: f64, coverage: f64, th: &LocationThresholds) {
+    pub fn observe(
+        &mut self,
+        node: &str,
+        t: UnixMs,
+        mean_rssi: f64,
+        coverage: f64,
+        th: &LocationThresholds,
+    ) {
         if !mean_rssi.is_finite() {
             return;
         }
@@ -143,7 +172,11 @@ impl DeviceTracker {
         if self.last_obs.is_some_and(|l| t < l - th.lateness_ms) {
             return;
         }
-        let e = self.smoothed.entry(node.to_string()).or_insert(Smoothed { value: mean_rssi, last_t: t, coverage });
+        let e = self.smoothed.entry(node.to_string()).or_insert(Smoothed {
+            value: mean_rssi,
+            last_t: t,
+            coverage,
+        });
         if t >= e.last_t {
             e.value = th.ema_alpha * mean_rssi + (1.0 - th.ema_alpha) * e.value;
             e.last_t = t;
@@ -152,7 +185,14 @@ impl DeviceTracker {
         self.last_obs = Some(self.last_obs.map_or(t, |l| l.max(t)));
     }
 
-    fn likelihoods(&self, now: UnixMs, model: &RoomModel, g: &RoomGraph, th: &LocationThresholds, scanning: &BTreeSet<String>) -> (BTreeMap<String, f64>, Vec<String>) {
+    fn likelihoods(
+        &self,
+        now: UnixMs,
+        model: &RoomModel,
+        g: &RoomGraph,
+        th: &LocationThresholds,
+        scanning: &BTreeSet<String>,
+    ) -> (BTreeMap<String, f64>, Vec<String>) {
         let fresh: BTreeMap<&str, &Smoothed> = self
             .smoothed
             .iter()
@@ -186,7 +226,11 @@ impl DeviceTracker {
                     .filter(|(n, _)| g.node_room.get(**n) == Some(room))
                     .map(|(_, s)| s.value)
                     .fold(f64::NEG_INFINITY, f64::max);
-                let score = if best.is_finite() { best / th.sigma_db } else { NON_DETECT_DBM / th.sigma_db };
+                let score = if best.is_finite() {
+                    best / th.sigma_db
+                } else {
+                    NON_DETECT_DBM / th.sigma_db
+                };
                 ll.insert(room.clone(), score);
             }
         }
@@ -203,7 +247,8 @@ impl DeviceTracker {
         let stay = 0.8;
         let leak = 0.01; // never hard-constrain to impossible rooms after missing evidence
         for _ in 0..steps {
-            let mut next: BTreeMap<String, f64> = g.rooms.iter().map(|r| (r.clone(), 0.0)).collect();
+            let mut next: BTreeMap<String, f64> =
+                g.rooms.iter().map(|r| (r.clone(), 0.0)).collect();
             for (r, p) in &self.posterior {
                 let nb = g.neighbors.get(r);
                 let n = nb.map_or(0, BTreeSet::len);
@@ -237,7 +282,13 @@ impl DeviceTracker {
         let calibrated = model.is_calibrated();
         let device_id = self.device_id.clone();
         let last_obs = self.last_obs;
-        let base = |state, room: Option<String>, conf: f64, reason: &str, contributing: Vec<String>, alts, last_known: Option<String>| LocationEstimate {
+        let base = |state,
+                    room: Option<String>,
+                    conf: f64,
+                    reason: &str,
+                    contributing: Vec<String>,
+                    alts,
+                    last_known: Option<String>| LocationEstimate {
             device_id: device_id.clone(),
             room_id: room,
             last_known_room: last_known,
@@ -252,15 +303,41 @@ impl DeviceTracker {
             reason: reason.into(),
         };
         match age {
-            None => return base(LocationState::NotObserved, None, 0.0, "never observed", vec![], vec![], None),
+            None => {
+                return base(
+                    LocationState::NotObserved,
+                    None,
+                    0.0,
+                    "never observed",
+                    vec![],
+                    vec![],
+                    None,
+                )
+            }
             Some(a) if a > th.not_observed_ms => {
                 self.posterior.clear();
                 self.candidate = None;
-                return base(LocationState::NotObserved, None, 0.0, "no observations within not-observed timeout", vec![], vec![], self.current.clone());
+                return base(
+                    LocationState::NotObserved,
+                    None,
+                    0.0,
+                    "no observations within not-observed timeout",
+                    vec![],
+                    vec![],
+                    self.current.clone(),
+                );
             }
             Some(a) if a > th.stale_ms => {
                 // Last-known room is labeled, never presented as fresh truth.
-                return base(LocationState::Stale, None, 0.0, "observations stale", vec![], vec![], self.current.clone());
+                return base(
+                    LocationState::Stale,
+                    None,
+                    0.0,
+                    "observations stale",
+                    vec![],
+                    vec![],
+                    self.current.clone(),
+                );
             }
             _ => {}
         }
@@ -274,12 +351,20 @@ impl DeviceTracker {
             *p = (p.max(1e-12)).ln() + (l - max_ll);
         }
         log_normalize(&mut self.posterior);
-        let mut ranked: Vec<(String, f64)> = self.posterior.iter().map(|(r, p)| (r.clone(), *p)).collect();
+        let mut ranked: Vec<(String, f64)> = self
+            .posterior
+            .iter()
+            .map(|(r, p)| (r.clone(), *p))
+            .collect();
         ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         let (top, p_top) = ranked.first().cloned().unwrap_or_default();
         let p_second = ranked.get(1).map_or(0.0, |x| x.1);
         let alts: Vec<(String, f64)> = ranked.iter().skip(1).take(2).cloned().collect();
-        let reason_mode = if calibrated { "calibrated fingerprint" } else { "uncalibrated nearest-node (lower confidence)" };
+        let reason_mode = if calibrated {
+            "calibrated fingerprint"
+        } else {
+            "uncalibrated nearest-node (lower confidence)"
+        };
         let confident = p_top >= th.min_confidence && p_top - p_second >= th.min_margin;
 
         if Some(&top) != self.current.as_ref() {
@@ -299,15 +384,33 @@ impl DeviceTracker {
         } else {
             self.candidate = None;
         }
-        let cur_p = self.current.as_ref().and_then(|c| self.posterior.get(c)).copied().unwrap_or(0.0);
-        let est = if self.current.is_some() && cur_p >= th.min_confidence && (self.current.as_ref() == Some(&top)) {
-            base(LocationState::Located, self.current.clone(), cur_p, reason_mode, contributing, alts, self.current.clone())
+        let cur_p = self
+            .current
+            .as_ref()
+            .and_then(|c| self.posterior.get(c))
+            .copied()
+            .unwrap_or(0.0);
+        let est = if self.current.is_some()
+            && cur_p >= th.min_confidence
+            && (self.current.as_ref() == Some(&top))
+        {
+            base(
+                LocationState::Located,
+                self.current.clone(),
+                cur_p,
+                reason_mode,
+                contributing,
+                alts,
+                self.current.clone(),
+            )
         } else {
             base(
                 LocationState::Ambiguous,
                 None,
                 p_top,
-                &format!("{reason_mode}: insufficient confidence/margin ({p_top:.2} vs {p_second:.2})"),
+                &format!(
+                    "{reason_mode}: insufficient confidence/margin ({p_top:.2} vs {p_second:.2})"
+                ),
                 contributing,
                 ranked.iter().take(3).cloned().collect(),
                 self.current.clone(),
@@ -318,10 +421,11 @@ impl DeviceTracker {
 
     /// Returns the estimate only if it differs materially from the last emitted one.
     pub fn changed(&mut self, est: LocationEstimate) -> Option<LocationEstimate> {
-        let differs = self
-            .last_emitted
-            .as_ref()
-            .is_none_or(|l| l.state != est.state || l.room_id != est.room_id || (l.confidence - est.confidence).abs() > 0.1);
+        let differs = self.last_emitted.as_ref().is_none_or(|l| {
+            l.state != est.state
+                || l.room_id != est.room_id
+                || (l.confidence - est.confidence).abs() > 0.1
+        });
         if differs {
             self.last_emitted = Some(est.clone());
             Some(est)
@@ -381,7 +485,11 @@ pub fn evaluate(pairs: &[(String, Option<String>)]) -> Evaluation {
         } else if pred.as_ref() == Some(truth) {
             e.correct += 1;
         }
-        *e.confusion.entry(truth.clone()).or_default().entry(p).or_default() += 1;
+        *e.confusion
+            .entry(truth.clone())
+            .or_default()
+            .entry(p)
+            .or_default() += 1;
     }
     if e.windows > 0 {
         e.accuracy = f64::from(e.correct) / f64::from(e.windows);
@@ -395,7 +503,7 @@ pub fn evaluate(pairs: &[(String, Option<String>)]) -> Evaluation {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -417,7 +525,11 @@ mod tests {
 
     fn model() -> RoomModel {
         let mut s = Vec::new();
-        let truth = [("living", [-55.0, -70.0, -85.0]), ("hall", [-70.0, -55.0, -70.0]), ("kitchen", [-85.0, -70.0, -55.0])];
+        let truth = [
+            ("living", [-55.0, -70.0, -85.0]),
+            ("hall", [-70.0, -55.0, -70.0]),
+            ("kitchen", [-85.0, -70.0, -55.0]),
+        ];
         for (room, means) in truth {
             for (node, mu) in ["n-l", "n-h", "n-k"].iter().zip(means) {
                 for k in 0..10 {
@@ -460,7 +572,11 @@ mod tests {
         now += 2000;
         feed(&mut t, now, [-85.0, -70.0, -55.0], &th);
         let e1 = t.step(now, &m, &g, &th, &scanning);
-        assert_ne!(e1.room_id.as_deref(), Some("kitchen"), "single window must not switch");
+        assert_ne!(
+            e1.room_id.as_deref(),
+            Some("kitchen"),
+            "single window must not switch"
+        );
         let mut final_room = None;
         for _ in 0..8 {
             now += 2000;
@@ -479,10 +595,18 @@ mod tests {
         let mut rooms = Vec::new();
         for i in 0..30i64 {
             let jitter = if i % 2 == 0 { 3.0 } else { -3.0 };
-            feed(&mut t, i * 2000, [-62.0 + jitter, -62.0 - jitter, -80.0], &th);
+            feed(
+                &mut t,
+                i * 2000,
+                [-62.0 + jitter, -62.0 - jitter, -80.0],
+                &th,
+            );
             rooms.push(t.step(i * 2000, &m, &g, &th, &scanning).room_id);
         }
-        let switches = rooms.windows(2).filter(|w| w[0] != w[1] && w[0].is_some() && w[1].is_some()).count();
+        let switches = rooms
+            .windows(2)
+            .filter(|w| w[0] != w[1] && w[0].is_some() && w[1].is_some())
+            .count();
         assert!(switches <= 1, "flapping: {rooms:?}");
     }
 
@@ -494,7 +618,10 @@ mod tests {
         let mut t = DeviceTracker::new("p");
         feed(&mut t, 0, [-55.0, -70.0, -85.0], &th);
         t.step(0, &m, &g, &th, &scanning);
-        assert_eq!(t.step(th.stale_ms + 1, &m, &g, &th, &scanning).state, LocationState::Stale);
+        assert_eq!(
+            t.step(th.stale_ms + 1, &m, &g, &th, &scanning).state,
+            LocationState::Stale
+        );
         let e = t.step(th.not_observed_ms + 1, &m, &g, &th, &scanning);
         assert_eq!(e.state, LocationState::NotObserved);
         assert_eq!(e.room_id, None);
@@ -518,7 +645,9 @@ mod tests {
 
     #[test]
     fn probabilities_normalize() {
-        let mut m: BTreeMap<String, f64> = [("a".to_string(), -1000.0), ("b".to_string(), -1001.0)].into_iter().collect();
+        let mut m: BTreeMap<String, f64> = [("a".to_string(), -1000.0), ("b".to_string(), -1001.0)]
+            .into_iter()
+            .collect();
         log_normalize(&mut m);
         let s: f64 = m.values().sum();
         assert!((s - 1.0).abs() < 1e-9);
@@ -526,7 +655,11 @@ mod tests {
 
     #[test]
     fn evaluation_counts_unknown_as_incorrect() {
-        let e = evaluate(&[("a".into(), Some("a".into())), ("a".into(), None), ("b".into(), Some("a".into()))]);
+        let e = evaluate(&[
+            ("a".into(), Some("a".into())),
+            ("a".into(), None),
+            ("b".into(), Some("a".into())),
+        ]);
         assert!((e.accuracy - 1.0 / 3.0).abs() < 1e-9);
         assert!((e.coverage - 2.0 / 3.0).abs() < 1e-9);
         assert!((e.accepted_accuracy - 0.5).abs() < 1e-9);

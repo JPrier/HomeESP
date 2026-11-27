@@ -12,7 +12,11 @@ use std::sync::{Arc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Parser)]
-#[command(name = "observatory-server", version, about = "Home Observatory central service")]
+#[command(
+    name = "observatory-server",
+    version,
+    about = "Home Observatory central service"
+)]
 struct Args {
     /// Site configuration (YAML).
     #[arg(long, default_value = "configs/site.yaml")]
@@ -33,12 +37,17 @@ fn read_secret(path: &str) -> Result<String> {
 /// Parse `node-id=<hex>` lines.
 fn read_echo_keys(path: &str) -> Result<HashMap<String, Vec<u8>>> {
     let mut m = HashMap::new();
-    for line in std::fs::read_to_string(path).with_context(|| format!("reading {path}"))?.lines() {
+    for line in std::fs::read_to_string(path)
+        .with_context(|| format!("reading {path}"))?
+        .lines()
+    {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (k, v) = line.split_once('=').context("echo keys: expected node=hex")?;
+        let (k, v) = line
+            .split_once('=')
+            .context("echo keys: expected node=hex")?;
         let key = hex::decode(v.trim()).context("echo keys: bad hex")?;
         if key.len() < 16 {
             bail!("echo key for {k} too short");
@@ -55,18 +64,27 @@ fn is_loopback(bind: &str) -> bool {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
     if args.log_json {
-        tracing_subscriber::fmt().json().with_env_filter(filter).init();
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(filter)
+            .init();
     } else {
         tracing_subscriber::fmt().with_env_filter(filter).init();
     }
-    let text = std::fs::read_to_string(&args.config).with_context(|| format!("reading {}", args.config.display()))?;
+    let text = std::fs::read_to_string(&args.config)
+        .with_context(|| format!("reading {}", args.config.display()))?;
     let cfg = SiteConfig::from_yaml_str(&text).map_err(|e| anyhow::anyhow!("{e}"))?;
     let base = args.config.parent().unwrap_or(Path::new("."));
     let resolve = |p: &str| -> String {
         let pb = PathBuf::from(p);
-        if pb.is_absolute() { p.to_string() } else { base.join(pb).to_string_lossy().into_owned() }
+        if pb.is_absolute() {
+            p.to_string()
+        } else {
+            base.join(pb).to_string_lossy().into_owned()
+        }
     };
 
     // Tokens: required unless loopback dev mode.
@@ -104,14 +122,32 @@ async fn main() -> Result<()> {
         Some((rev, s)) if s == sha => rev,
         _ => store.save_config_revision(now_ms(), "startup", &sha, &text)?,
     };
-    let counter: u64 = store.kv_get("incident_counter")?.and_then(|v| v.parse().ok()).unwrap_or(0);
+    let counter: u64 = store
+        .kv_get("incident_counter")?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     tracing::info!(revision, incident_counter = counter, db = %db_path.display(), "storage ready");
     let writer = writer::spawn(store, cfg.server.ingest_queue);
 
     let (events, _) = tokio::sync::broadcast::channel(1024);
-    let engine = Engine::with_incident_counter(cfg.clone(), counter);
+    let mut engine = Engine::with_incident_counter(cfg.clone(), counter);
+    // Restore last-seen times so nodes that went silent before a restart are still
+    // detected as missing (S15).
+    for row in ho_storage::Store::open_readonly(&db_path)
+        .and_then(|r| r.nodes())
+        .unwrap_or_default()
+    {
+        if let (Some(id), Some(t)) = (row["id"].as_str(), row["last_seen"].as_i64()) {
+            engine.seed_last_seen(id, t);
+        }
+    }
     let snapshot = Arc::new(engine.snapshot());
-    let dashboard_dir = cfg.server.dashboard_dir.as_ref().map(|d| PathBuf::from(resolve(d))).filter(|d| d.join("index.html").exists());
+    let dashboard_dir = cfg
+        .server
+        .dashboard_dir
+        .as_ref()
+        .map(|d| PathBuf::from(resolve(d)))
+        .filter(|d| d.join("index.html").exists());
     let app = Arc::new(Shared {
         cfg: cfg.clone(),
         config_path: Some(args.config.clone()),
@@ -137,21 +173,39 @@ async fn main() -> Result<()> {
     let cancel = CancellationToken::new();
     let mut tasks = Vec::new();
     if cfg.mqtt.enabled {
-        let (client, el) = jobs::mqtt_client(&cfg, mqtt_password).map_err(|e| anyhow::anyhow!(e))?;
+        let (client, el) =
+            jobs::mqtt_client(&cfg, mqtt_password).map_err(|e| anyhow::anyhow!(e))?;
         if let Ok(mut m) = app.mqtt.write() {
             *m = Some(client.clone());
         }
-        tasks.push(tokio::spawn(jobs::run_mqtt(app.clone(), client, el, cancel.clone())));
+        tasks.push(tokio::spawn(jobs::run_mqtt(
+            app.clone(),
+            client,
+            el,
+            cancel.clone(),
+        )));
     }
     tasks.push(tokio::spawn(jobs::run_ticks(app.clone(), cancel.clone())));
     tasks.push(tokio::spawn(jobs::run_outbox(app.clone(), cancel.clone())));
     tasks.push(tokio::spawn(jobs::run_central(app.clone(), cancel.clone())));
-    tasks.push(tokio::spawn(jobs::run_echo(app.clone(), echo_keys, cancel.clone())));
+    tasks.push(tokio::spawn(jobs::run_echo(
+        app.clone(),
+        echo_keys,
+        cancel.clone(),
+    )));
     tasks.push(tokio::spawn(jobs::run_ha(app.clone(), cancel.clone())));
-    tasks.push(tokio::spawn(jobs::run_maintenance(app.clone(), cancel.clone())));
-    tasks.push(tokio::spawn(jobs::run_watchdog(app.clone(), cancel.clone())));
+    tasks.push(tokio::spawn(jobs::run_maintenance(
+        app.clone(),
+        cancel.clone(),
+    )));
+    tasks.push(tokio::spawn(jobs::run_watchdog(
+        app.clone(),
+        cancel.clone(),
+    )));
 
-    let listener = tokio::net::TcpListener::bind(&cfg.server.bind).await.with_context(|| format!("binding {}", cfg.server.bind))?;
+    let listener = tokio::net::TcpListener::bind(&cfg.server.bind)
+        .await
+        .with_context(|| format!("binding {}", cfg.server.bind))?;
     tracing::info!(bind = %cfg.server.bind, "http api listening");
     let c2 = cancel.clone();
     axum::serve(listener, api::router(app.clone()))

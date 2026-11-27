@@ -34,10 +34,15 @@ impl Tokens {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let (role, tok) = line.split_once('=').ok_or(format!("line {}: expected role=token", i + 1))?;
+            let (role, tok) = line
+                .split_once('=')
+                .ok_or(format!("line {}: expected role=token", i + 1))?;
             let tok = tok.trim();
             if tok.len() < 24 {
-                return Err(format!("line {}: token too short (>= 24 chars required)", i + 1));
+                return Err(format!(
+                    "line {}: token too short (>= 24 chars required)",
+                    i + 1
+                ));
             }
             match role.trim() {
                 "operator" => t.operator.push(tok.as_bytes().to_vec()),
@@ -56,7 +61,10 @@ impl Tokens {
     }
 
     pub fn dev_open() -> Self {
-        Tokens { dev_open: true, ..Default::default() }
+        Tokens {
+            dev_open: true,
+            ..Default::default()
+        }
     }
 
     /// Resolve the caller's role from `Authorization: Bearer ...`.
@@ -64,7 +72,10 @@ impl Tokens {
         if self.dev_open {
             return Some(Role::Operator);
         }
-        let v = headers.get(axum::http::header::AUTHORIZATION)?.to_str().ok()?;
+        let v = headers
+            .get(axum::http::header::AUTHORIZATION)?
+            .to_str()
+            .ok()?;
         let tok = v.strip_prefix("Bearer ")?.trim().as_bytes();
         if self.operator.iter().any(|t| ct_eq(t, tok)) {
             return Some(Role::Operator);
@@ -77,18 +88,27 @@ impl Tokens {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::panic)]
 mod tests {
     use super::*;
 
     #[test]
     fn roles() {
-        let t = Tokens::parse("operator=aaaaaaaaaaaaaaaaaaaaaaaaaaaa\nviewer=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n").unwrap();
+        let t = Tokens::parse(
+            "operator=aaaaaaaaaaaaaaaaaaaaaaaaaaaa\nviewer=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+        )
+        .unwrap();
         let mut h = HeaderMap::new();
         assert_eq!(t.role(&h), None);
-        h.insert("authorization", "Bearer aaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap());
+        h.insert(
+            "authorization",
+            "Bearer aaaaaaaaaaaaaaaaaaaaaaaaaaaa".parse().unwrap(),
+        );
         assert_eq!(t.role(&h), Some(Role::Operator));
-        h.insert("authorization", "Bearer bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".parse().unwrap());
+        h.insert(
+            "authorization",
+            "Bearer bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".parse().unwrap(),
+        );
         assert_eq!(t.role(&h), Some(Role::Viewer));
         h.insert("authorization", "Bearer wrong".parse().unwrap());
         assert_eq!(t.role(&h), None);
