@@ -273,6 +273,9 @@ pub struct World {
     pub bytes_sent: u64,
     pub frames_sent: u64,
     pub frames_dropped_offline: u64,
+    /// When set, central probe results are also kept for an external consumer.
+    pub record_central: bool,
+    pub central_log: Vec<(u64, ProbeObs)>,
 }
 
 fn bssid_of(cfg: &SiteConfig, ap: &str) -> [u8; 6] {
@@ -354,6 +357,8 @@ impl World {
             bytes_sent: 0,
             frames_sent: 0,
             frames_dropped_offline: 0,
+            record_central: false,
+            central_log: Vec::new(),
         }
     }
 
@@ -692,6 +697,9 @@ impl World {
             self.central_seq += 1;
             let seq = self.central_seq;
             let now = self.now;
+            if self.record_central {
+                self.central_log.push((seq, probe.clone()));
+            }
             self.h.central(now, seq, probe);
         }
     }

@@ -1,0 +1,73 @@
+# Compose simulation demo: synthetic data only (observatory-server --simulate).
+# profile. All identifiers and addresses are fictional (RFC 5737 / locally
+# administered MACs); nothing here describes a real home.
+schema_version: 1
+site_id: home
+server:
+  bind: 0.0.0.0:8080
+  database_path: /tmp/s/observatory.sqlite
+  dashboard_dir: /app/dashboard
+  echo_bind: 0.0.0.0:47019
+  api_tokens_file: /tmp/s/api_tokens
+mqtt:
+  host: broker
+  port: 1883
+  username: observatory-server
+  
+floors:
+  - {id: ground, name: Ground floor, scale_m: 1.0}
+rooms:
+  - {id: living, name: Living room, floor: ground, polygon: [[0,0],[6,0],[6,5],[0,5]]}
+  - {id: hall, name: Hallway, floor: ground, polygon: [[6,0],[8,0],[8,10],[6,10]]}
+  - {id: kitchen, name: Kitchen, floor: ground, polygon: [[0,5],[6,5],[6,10],[0,10]]}
+  - {id: office, name: Office, floor: ground, polygon: [[8,0],[13,0],[13,6],[8,6]]}
+room_edges:
+  - {from: living, to: hall}
+  - {from: living, to: kitchen}
+  - {from: hall, to: kitchen}
+  - {from: hall, to: office}
+nodes:
+  - {id: node-01, room: living, position: [1.0, 1.0, 1.0], expected_ap: ap-living}
+  - {id: node-02, room: living, position: [5.0, 4.0, 1.0], expected_ap: ap-living}
+  - {id: node-03, room: kitchen, position: [3.0, 8.0, 1.0], expected_ap: ap-living}
+  - {id: node-04, room: hall, position: [7.0, 6.0, 1.0], expected_ap: ap-office}
+  - {id: node-05, room: office, position: [11.0, 3.0, 1.0], expected_ap: ap-office}
+  - {id: node-06, room: office, position: [12.0, 5.0, 1.0], expected_ap: ap-office}
+assets:
+  - {id: wan-a, kind: wan, name: External check A}
+  - {id: wan-b, kind: wan, name: External check B}
+  - {id: gateway, kind: router, critical: true, address: 192.0.2.1, parents: [wan-a]}
+  - {id: switch, kind: switch, critical: true, parents: [gateway]}
+  - {id: ap-living, kind: access_point, critical: true, parents: [switch]}
+  - {id: ap-office, kind: access_point, critical: true, parents: [switch]}
+  - {id: observatory, kind: server, parents: [switch]}
+  - {id: app, kind: service, name: Media server, address: 192.0.2.20, parents: [switch]}
+radios:
+  - {bssid: "02:00:00:00:01:01", ap: ap-living, band: "2.4", channel: 1}
+  - {bssid: "02:00:00:00:02:01", ap: ap-office, band: "2.4", channel: 6}
+probe_targets:
+  - {id: gw-icmp, kind: icmp, addr: gateway, asset: gateway, critical: true}
+  - {id: server-icmp, kind: icmp, addr: server, asset: observatory}
+  - {id: server-udp, kind: udp_echo, addr: server, asset: observatory}
+  - {id: dns-local, kind: dns, addr: assigned_resolver, asset: gateway, critical: true, qname: router.home.arpa, expect: {type: ipv4, address: 192.0.2.1}}
+central_checks:
+  - {id: c-gw, kind: tcp, host: 192.0.2.1, port: 53, asset: gateway, critical: true}
+  - {id: c-dns, kind: dns, host: 192.0.2.1, qname: router.home.arpa, expect: {type: ipv4, address: 192.0.2.1}, asset: gateway, critical: true, interval_ms: 5000}
+  - {id: c-ap-living, kind: icmp, host: 192.0.2.11, asset: ap-living, critical: true}
+  - {id: c-ap-office, kind: icmp, host: 192.0.2.12, asset: ap-office, critical: true}
+  - {id: c-wan-a, kind: tcp, host: 198.51.100.1, port: 443, asset: wan-a, interval_ms: 10000, timeout_ms: 2000}
+  - {id: c-wan-b, kind: tcp, host: 203.0.113.1, port: 443, asset: wan-b, interval_ms: 10000, timeout_ms: 2000}
+  - {id: c-app, kind: http, host: 192.0.2.20, port: 8096, path: /health, asset: app}
+devices:
+  - {id: phone-1, kind: phone, name: Phone One, consent: true, matcher: {type: ibeacon, uuid: 11111111-2222-3333-4444-555555555555, major: 1, minor: 1}}
+  - {id: tag-1, kind: pet_tag, name: Pet tag, consent: true, matcher: {type: ibeacon, uuid: 11111111-2222-3333-4444-555555555555, major: 1, minor: 2}}
+privacy:
+  location_enabled: true
+  publish_location_to_ha: false
+notifications:
+  notifiers:
+    - {id: sim-webhook, kind: webhook, url: "http://sink:18090/hook", allow_plain_http_lan: true}
+  routes:
+    - {notifier: sim-webhook, min_severity: warning}
+home_assistant:
+  enabled: true

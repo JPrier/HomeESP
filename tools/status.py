@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Print a compact live status from a running observatory-server.
 usage: python tools/status.py [base_url] [tokens_file]"""
-import json, sys, urllib.request
+import json
+import sys
+import urllib.request
 
 base = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8080"
 tokfile = sys.argv[2] if len(sys.argv) > 2 else "local/secrets/api_tokens"
-token = [l.split("=", 1)[1].strip() for l in open(tokfile) if l.startswith("viewer=")][0]
+with open(tokfile) as fh:
+    token = [ln.split("=", 1)[1].strip() for ln in fh if ln.startswith("viewer=")][0]
 req = urllib.request.Request(base + "/api/v1/site/status", headers={"Authorization": "Bearer " + token})
 d = json.load(urllib.request.urlopen(req, timeout=10))
 print("ingestion", d["ingestion_ok"], "mqtt", d["mqtt_connected"], "desired_rev", d["desired_revision"], "uptime_s", d["uptime_s"])

@@ -1,0 +1,142 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust:
+    name: rust (fmt, clippy, tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.1
+          components: rustfmt, clippy
+          targets: thumbv7em-none-eabihf
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      - name: clippy (warnings are errors)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: tests
+        run: cargo test --workspace --locked
+      - name: protocol builds no_std (shared with embedded targets)
+        run: cargo build -p ho-protocol --target thumbv7em-none-eabihf --locked
+      - name: architecture rules (pure layers have no IO dependencies)
+        run: tools/check_architecture.sh
+      - name: scenario sweep (S01-S17 x 5 seeds, release)
+        run: cargo run --release --locked -p ho-cli -- sim all --seeds 5
+      - name: golden vectors unchanged
+        run: git diff --exit-code tests/golden
+
+  supply-chain:
+    name: dependency, advisory and license review
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources
+
+  firmware-host:
+    name: firmware core host tests (ASan/UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: SANITIZE=1 firmware/test/host/run.sh
+      - name: same tests with clang
+        run: CXX=clang++ OUT_DIR=/tmp/clang firmware/test/host/run.sh
+
+  firmware-build:
+    name: firmware build (esp8266-4m) + size report
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('firmware/platformio.ini') }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install platformio==6.1.18
+      - run: pio run -d firmware
+      - name: size report and budget gate (RAM < 70%, flash < 60%)
+        run: |
+          pio run -d firmware -t size | tee size.txt
+          python tools/size_gate.py size.txt 70 60
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-esp8266-4m
+          path: firmware/.pio/build/esp8266-4m/firmware.bin
+
+  dashboard:
+    name: dashboard (lint, typecheck, tests, build)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.12.0
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: no external URLs in built assets (local-first, no CDN/analytics)
+        run: "! grep -RhoE 'https?://[a-zA-Z0-9.-]+' dist | grep -vE 'w3.org|reactjs.org|react.dev' "
+
+  tools:
+    name: python tools (lint, unit tests)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff==0.8.4 pyserial==3.5 pytest==8.3.4
+      - run: ruff check tools
+      - run: python -m pytest -q tools/tests
+
+  e2e:
+    name: end-to-end with a real broker (auth, ACLs, ingest, API)
+    runs-on: ubuntu-24.04
+    needs: [rust]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.91.1
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y mosquitto mosquitto-clients
+      - run: cargo build --locked -p ho-server -p ho-cli
+      - run: tests/e2e/broker_e2e.sh
+
+  image:
+    name: container image build + simulation smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f deploy/Dockerfile -t home-observatory:ci .
+      - name: image smoke (simulation, no network probing)
+        run: |
+          docker run --rm --network none --entrypoint observatory-cli home-observatory:ci sim run --scenario S04

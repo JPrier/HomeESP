@@ -375,7 +375,8 @@ fn provision(
     }
     // Fixed location only: the source tree this binary was built from (compile-time
     // path) or an explicit --tool. Never search parent dirs or the current directory.
-    let tool = tool.unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/esp.py"));
+    let tool = tool
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/esp.py"));
     let tool = tool
         .canonicalize()
         .with_context(|| format!("provisioning tool not found: {}", tool.display()))?;

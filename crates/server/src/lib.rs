@@ -7,6 +7,7 @@ pub mod desired;
 pub mod effects;
 pub mod ingest;
 pub mod jobs;
+pub mod sim;
 pub mod writer;
 
 use ho_domain::{SiteConfig, UnixMs};

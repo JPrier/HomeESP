@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Development webhook sink: records POSTed notifications to a JSONL file (loopback only)."""
-import json, sys, time
+import json
+import sys
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 OUT = sys.argv[2] if len(sys.argv) > 2 else "webhook.jsonl"

@@ -27,6 +27,12 @@ struct Args {
     /// Allow running without API tokens (only when bound to loopback).
     #[arg(long)]
     dev_no_auth: bool,
+    /// Demo mode: synthetic nodes from the deterministic simulator, MQTT and all real
+    /// network probing disabled. Safe on any network; data is clearly synthetic.
+    #[arg(long)]
+    simulate: bool,
+    #[arg(long, default_value_t = 42)]
+    seed: u64,
 }
 
 fn read_secret(path: &str) -> Result<String> {
@@ -76,7 +82,13 @@ async fn main() -> Result<()> {
     }
     let text = std::fs::read_to_string(&args.config)
         .with_context(|| format!("reading {}", args.config.display()))?;
-    let cfg = SiteConfig::from_yaml_str(&text).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let mut cfg = SiteConfig::from_yaml_str(&text).map_err(|e| anyhow::anyhow!("{e}"))?;
+    if args.simulate {
+        cfg.mqtt.enabled = false;
+        cfg.server.echo_bind = None;
+        cfg.home_assistant.enabled = false;
+        cfg.watchdog = None;
+    }
     let base = args.config.parent().unwrap_or(Path::new("."));
     let resolve = |p: &str| -> String {
         let pb = PathBuf::from(p);
@@ -187,7 +199,15 @@ async fn main() -> Result<()> {
     }
     tasks.push(tokio::spawn(jobs::run_ticks(app.clone(), cancel.clone())));
     tasks.push(tokio::spawn(jobs::run_outbox(app.clone(), cancel.clone())));
-    tasks.push(tokio::spawn(jobs::run_central(app.clone(), cancel.clone())));
+    if args.simulate {
+        tasks.push(tokio::spawn(ho_server::sim::run(
+            app.clone(),
+            args.seed,
+            cancel.clone(),
+        )));
+    } else {
+        tasks.push(tokio::spawn(jobs::run_central(app.clone(), cancel.clone())));
+    }
     tasks.push(tokio::spawn(jobs::run_echo(
         app.clone(),
         echo_keys,

@@ -76,7 +76,7 @@ services:
         mkdir -p /tmp/s && printf 'operator=sim-operator-token-0000000000\nviewer=sim-viewer-token-00000000000000\n' > /tmp/s/api_tokens &&
         observatory-cli sim run --scenario S02 --export /tmp/s/capture.jsonl >/dev/null;
         observatory-cli replay --input /tmp/s/capture.jsonl;
-        exec observatory-server --config /app/sim.yaml
+        exec observatory-server --config /app/sim.yaml --simulate
     volumes:
       - ../configs/sim-demo.yaml:/app/sim.yaml:ro
 
