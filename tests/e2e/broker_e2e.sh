@@ -18,6 +18,7 @@ view="e2e-viewer-token-00000000000000000000"
 mkdir -p "$work/secrets" "$work/mosq"
 printf 'node-01:%s\nnode-02:x-%s\nobservatory-server:%s\n' "$node_pw" "$node_pw" "$srv_pw" > "$work/mosq/passwd"
 mosquitto_passwd -U "$work/mosq/passwd"
+chmod 0600 "$work/mosq/passwd"
 cp "$root/deploy/mosquitto/acl" "$work/mosq/acl"
 cat > "$work/mosq/mosquitto.conf" <<EOF
 listener $port 127.0.0.1
@@ -35,6 +36,7 @@ sed -e "s#bind: 0.0.0.0:8080#bind: 127.0.0.1:$api#" \
     -e "/echo_keys_file/d" \
     -e "s#host: broker#host: 127.0.0.1#" -e "s#port: 1883#port: $port#" \
     -e "s#password_file: /run/secrets/mqtt_server#password_file: $work/secrets/mqtt_server#" \
+    -e '/^central_checks:/,/^devices:/{/^devices:/!d}' \
     "$root/configs/sim-site.yaml" > "$work/site.yaml"
 "$bin/observatory-cli" config validate --file "$work/site.yaml"
 "$bin/observatory-server" --config "$work/site.yaml" > "$work/server.log" 2>&1 &
