@@ -35,6 +35,8 @@ redelivery invariants, time mapping never in the future, loss always in [0, 100]
 | Desired config revision applied and reported | PASS (rev 2 applied) |
 | Durable event ACK round trip | PASS (258+ events acked) |
 | Field bugs found and fixed | lwmqtt −9 on blocking ops (QoS 0 publishes, ack-first subscribe); modem sleep inflating RTT; scan-channel link samples; reconnect storm on lossy link (10 s command timeout, flap-aware backoff, fw 0.1.3) |
+| Firmware 0.1.3 reconnect fix | PASS (short window): node-02 went from 32 reconnects / 14 min (lwmqtt −4/−9) to 3 / ~6 min; heap back to ~26.8 KB |
+| Weak node finding | node-02 shows 60–68% probe loss while node-01/03 on the same desk show 1–6% at similar RSSI — points to that board or its USB port (it is the only one on a separate hub), not coverage. Open in the live system as a wireless-path incident |
 | 24 h soak | NOT RUN (deployment is hours old; see live metrics to continue) |
 | BLE enrollment / room accuracy on hardware | BLOCKED — boards have no BLE radio |
 | OTA | NOT APPLICABLE on this profile (USB update only; reported in capabilities) |
