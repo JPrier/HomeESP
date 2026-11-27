@@ -1,0 +1,83 @@
+# Home Observatory deployment.
+#
+# Production (host networking so the host firewall governs exposure explicitly):
+#   OBS_DIR=/home/observatory docker compose -f deploy/compose.yaml up -d broker server
+# Simulation demo (no real network probing, no hardware, no real credentials):
+#   docker compose -f deploy/compose.yaml --profile simulation up --build
+#
+# Layout of ${OBS_DIR}: config/site.yaml, secrets/*, data/, mosquitto/{mosquitto.conf,acl,passwd,data/}
+
+name: home-observatory
+
+services:
+  broker:
+    image: eclipse-mosquitto:2.0.20
+    network_mode: host
+    restart: unless-stopped
+    user: "1883:1883"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 64m
+    cpus: 0.5
+    volumes:
+      - ${OBS_DIR:-/home/observatory}/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ${OBS_DIR:-/home/observatory}/mosquitto/acl:/mosquitto/config/acl:ro
+      - ${OBS_DIR:-/home/observatory}/mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ${OBS_DIR:-/home/observatory}/mosquitto/data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 1883 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  server:
+    image: home-observatory:0.1.0
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    network_mode: host
+    restart: unless-stopped
+    depends_on: [broker]
+    read_only: true
+    cap_drop: [ALL]               # ICMP uses unprivileged ping sockets (net.ipv4.ping_group_range)
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    cpus: 1.0
+    stop_grace_period: 15s
+    volumes:
+      - ${OBS_DIR:-/home/observatory}/config:/config
+      - ${OBS_DIR:-/home/observatory}/secrets:/run/secrets:ro
+      - ${OBS_DIR:-/home/observatory}/data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/$${HEALTH_PORT:-18080} && printf 'GET /health/live HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q ok <&3"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ---- simulation profile: isolated network, simulated nodes only ----
+  sim-broker:
+    profiles: [simulation]
+    image: eclipse-mosquitto:2.0.20
+    networks: [sim]
+    command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
+  sim-server:
+    profiles: [simulation]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    networks: [sim]
+    ports: ["127.0.0.1:8080:8080"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        mkdir -p /tmp/s && printf 'operator=sim-operator-token-0000000000\nviewer=sim-viewer-token-00000000000000\n' > /tmp/s/api_tokens &&
+        observatory-cli sim run --scenario S02 --export /tmp/s/capture.jsonl >/dev/null;
+        observatory-cli replay --input /tmp/s/capture.jsonl;
+        exec observatory-server --config /app/sim.yaml
+    volumes:
+      - ../configs/sim-demo.yaml:/app/sim.yaml:ro
+
+networks:
+  sim:
+    internal: true
