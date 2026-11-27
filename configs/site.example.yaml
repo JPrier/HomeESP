@@ -1,0 +1,95 @@
+# Production template. Every value below is a PLACEHOLDER (RFC 5737 addresses,
+# example.invalid names, locally administered MACs). Copy to your own site.yaml,
+# replace them with your real inventory, then run:
+#   observatory-cli config validate --file site.yaml
+# Secrets are never written here: only paths to files that contain them.
+schema_version: 1
+site_id: home
+
+server:
+  bind: 192.0.2.10:8080            # LAN address of the wired server; never expose to WAN
+  database_path: /data/observatory.sqlite
+  dashboard_dir: /app/dashboard
+  echo_bind: 192.0.2.10:47019       # UDP echo for node probes (LAN only)
+  api_tokens_file: /run/secrets/api_tokens      # operator=... / viewer=... lines
+  echo_keys_file: /run/secrets/echo_keys        # node-id=<hex key> lines
+  max_frames_per_node_per_s: 10
+
+mqtt:
+  host: broker.example.invalid
+  port: 8883
+  username: observatory-server
+  password_file: /run/secrets/mqtt_server
+  tls_ca_file: /run/secrets/ca.crt
+
+profiles:
+  default:
+    report_ms: 2000
+    gateway_probe_ms: 5000
+    server_probe_ms: 5000
+    udp_probe_ms: 10000
+    dns_probe_ms: 30000
+    neighbor_scan_ms: 120000
+    heartbeat_ms: 10000
+    egress_bytes_per_sec: 600
+    egress_burst_bytes: 1800
+    max_publish_payload_bytes: 1024
+    max_offline_buffer_bytes: 6144
+    passive_scan_enabled: true
+    ble_enabled: false            # ESP8266 has no BLE radio; enable only on BLE-capable boards
+    csi_enabled: false
+
+floors:
+  - {id: ground, name: Ground floor, scale_m: 1.0}
+rooms:
+  - {id: living, name: Living room, floor: ground, polygon: [[0,0],[5,0],[5,4],[0,4]]}
+  - {id: hall, name: Hallway, floor: ground, polygon: [[5,0],[7,0],[7,8],[5,8]]}
+room_edges:
+  - {from: living, to: hall}
+
+nodes:
+  - {id: node-01, room: living, position: [1.0, 1.0, 1.0], board: "ESP8266EX 4MB", expected_ap: ap-main}
+  - {id: node-02, room: hall, position: [6.0, 4.0, 1.0], board: "ESP8266EX 4MB", expected_ap: ap-main}
+
+assets:
+  - {id: wan-a, kind: wan, name: "Approved external endpoint A"}
+  - {id: wan-b, kind: wan, name: "Approved external endpoint B"}
+  - {id: gateway, kind: router, critical: true, address: 192.0.2.1, parents: [wan-a]}
+  - {id: ap-main, kind: access_point, critical: true, address: 192.0.2.2, parents: [gateway]}
+  - {id: observatory, kind: server, parents: [gateway]}
+
+radios:
+  - {bssid: "02:00:00:00:00:01", ap: ap-main, band: "2.4", channel: 1}
+
+probe_targets:
+  - {id: gw-icmp, kind: icmp, addr: gateway, asset: gateway, critical: true}
+  - {id: server-icmp, kind: icmp, addr: server, asset: observatory}
+  - {id: server-udp, kind: udp_echo, addr: server, asset: observatory}
+  - {id: dns-local, kind: dns, addr: assigned_resolver, asset: gateway, critical: true,
+     qname: router.example.invalid, expect: {type: ipv4, address: 192.0.2.1}}
+
+central_checks:
+  - {id: c-gw, kind: tcp, host: 192.0.2.1, port: 53, asset: gateway, critical: true}
+  - {id: c-dns, kind: dns, host: 192.0.2.1, qname: router.example.invalid,
+     expect: {type: ipv4, address: 192.0.2.1}, asset: gateway, interval_ms: 30000, timeout_ms: 2000}
+  - {id: c-ap-mgmt, kind: icmp, host: 192.0.2.2, asset: ap-main, critical: true}
+  - {id: c-wan-a, kind: tcp, host: 198.51.100.1, port: 443, asset: wan-a, interval_ms: 60000, timeout_ms: 3000}
+  - {id: c-wan-b, kind: tcp, host: 203.0.113.1, port: 443, asset: wan-b, interval_ms: 60000, timeout_ms: 3000}
+
+privacy:
+  location_enabled: false          # enable only after enrollment, consent and calibration
+  unknown_ble_retention: none
+
+notifications:
+  notifiers:
+    - {id: ntfy, kind: ntfy, url: "https://ntfy.example.invalid/home-observatory", token_file: /run/secrets/ntfy_token}
+  routes:
+    - {notifier: ntfy, min_severity: warning, send_recovery: true}
+
+home_assistant:
+  enabled: false
+  discovery_prefix: homeassistant
+
+# watchdog:
+#   url: https://watchdog.example.invalid/ping/<uuid>
+#   interval_ms: 60000

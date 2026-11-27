@@ -659,6 +659,7 @@ dependencies = [
  "ho-simulator",
  "ho-storage",
  "serde_json",
+ "serde_yaml",
  "tempfile",
 ]
 
