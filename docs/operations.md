@@ -10,9 +10,17 @@ OBS_UID=10101                   # a UID unused on this host
 OBS_HEALTH_ADDR=192.0.2.10      # = server.bind address
 OBS_HEALTH_PORT=18080
 EOF
-docker compose build server       # ~10 min on a 4-core desktop CPU
+docker compose build server       # ~10 min on a 4-core desktop CPU (see warning below)
 docker compose up -d broker server
 ```
+
+> **Check where image layers live before building on a shared server.** With Docker's
+> containerd image store, build snapshots go to containerd's root (default
+> `/var/lib/containerd`), *not* Docker's `data-root`. A Rust release build needs several
+> GB; on a host with a small `/var` this can fill it and break other services (observed:
+> a UniFi controller's MongoDB restarted). On such hosts build the binaries elsewhere and
+> use `deploy/Dockerfile.prebuilt` (runtime layers only, ~100 MB), and run
+> `docker builder prune` after any build.
 
 `${OBS_DIR}` layout: `config/site.yaml`, `secrets/{api_tokens,mqtt_server,echo_keys}`
 (0600, owned by `OBS_UID`), `data/` (SQLite), `mosquitto/{mosquitto.conf,acl,passwd,data/}`

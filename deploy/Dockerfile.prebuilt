@@ -1,0 +1,13 @@
+# Runtime-only image from binaries built elsewhere (e.g. on a workstation), for
+# hosts where in-place `docker build` is unsafe. Expects ./prebuilt/{observatory-server,
+# observatory-cli} (glibc <= 2.41) and ./prebuilt/dashboard/ next to this file.
+#   docker build -f Dockerfile.prebuilt -t home-observatory:0.1.0 .
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --uid 10001 --home /data --shell /usr/sbin/nologin observatory
+COPY prebuilt/observatory-server prebuilt/observatory-cli /usr/local/bin/
+COPY prebuilt/dashboard /app/dashboard
+USER 10001
+WORKDIR /data
+ENTRYPOINT ["/usr/local/bin/observatory-server"]
+CMD ["--config", "/config/site.yaml", "--log-json"]
