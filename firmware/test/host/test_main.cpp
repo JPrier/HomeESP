@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "../../lib/hocore/src/ho_codec.h"
+#include "../../lib/hocore/src/ho_config.h"
 #include "../../lib/hocore/src/ho_core.h"
 #include "../../lib/hocore/src/ho_dns.h"
 #include "../../lib/hocore/src/ho_hmac.h"
@@ -408,6 +409,56 @@ TEST(udp_echo_matches_rust_golden_and_verifies) {
   resp[m - 1] ^= 1;
   CHECK(!ho::echo_verify_response(resp, m, "node-01", 7, 0xdeadbeefu, ECHO_KEY, 32));
   CHECK(!ho::echo_verify_response(req, n, "node-01", 7, 0xdeadbeefu, ECHO_KEY, 32));  // request is not a response
+}
+
+
+// ---------------------------------------------------------------- config validation
+
+static ho::ConfigParamsRec good_params(uint64_t rev) {
+  ho::ConfigParamsRec p{};
+  p.revision = rev; p.report_ms = 2000; p.wifi_link_ms = 5000; p.ap_scan_ms = 120000; p.heartbeat_ms = 10000;
+  p.health_ms = 60000; p.egress_bytes_per_sec = 600; p.egress_burst_bytes = 1800; p.max_payload = 1024;
+  p.offline_buffer_bytes = 6144; p.flags = ho::cfgflag::kPassiveScan; p.max_probe_inflight = 2; p.scan_max_dwell_ms = 120;
+  return p;
+}
+
+static ho::ProbeTargetRec target(const char* id, ho::ProbeKind k) {
+  ho::ProbeTargetRec t{};
+  snprintf(t.id, sizeof t.id, "%s", id);
+  t.kind = k; t.addr_source = ho::AddrSource::Gateway; t.interval_ms = 5000; t.timeout_ms = 1000;
+  return t;
+}
+
+TEST(validate_config_rules) {
+  using namespace ho;
+  const ConfigLimits esp8266{feature::kWifiSta | feature::kApScan | feature::kIcmp | feature::kUdpEcho | feature::kDns | feature::kTcp, 8, 16, 6144};
+  ProbeTargetRec t[3] = {target("gw-icmp", ProbeKind::Icmp), target("srv", ProbeKind::UdpEcho), target("d", ProbeKind::Dns)};
+  snprintf(t[2].qname, sizeof t[2].qname, "router.home.arpa");
+  CHECK(validate_config(good_params(5), 4, t, 3, 0, esp8266) == reject::kNone);
+  CHECK(validate_config(good_params(4), 4, t, 3, 0, esp8266) == reject::kStale);       // same revision
+  CHECK(validate_config(good_params(3), 4, t, 3, 0, esp8266) == reject::kStale);       // older revision
+  ConfigParamsRec p = good_params(5);
+  p.egress_bytes_per_sec = 50000;
+  CHECK(validate_config(p, 4, t, 3, 0, esp8266) == reject::kRange);                    // unsafe budget
+  p = good_params(5); p.egress_burst_bytes = 100;
+  CHECK(validate_config(p, 4, t, 3, 0, esp8266) == reject::kRange);                    // burst < rate
+  p = good_params(5); p.offline_buffer_bytes = 16384;
+  CHECK(validate_config(p, 4, t, 3, 0, esp8266) == reject::kRange);                    // exceeds arena
+  p = good_params(5); p.flags |= cfgflag::kBleScan;
+  CHECK(validate_config(p, 4, t, 3, 0, esp8266) == reject::kUnsupported);              // no BLE radio
+  p = good_params(5); p.flags |= cfgflag::kCsi;
+  CHECK(validate_config(p, 4, t, 3, 0, esp8266) == reject::kUnsupported);
+  ProbeTargetRec http[1] = {target("h", ProbeKind::Http)};
+  CHECK(validate_config(good_params(5), 4, http, 1, 0, esp8266) == reject::kUnsupported);
+  ProbeTargetRec dup[2] = {target("x", ProbeKind::Icmp), target("x", ProbeKind::Icmp)};
+  CHECK(validate_config(good_params(5), 4, dup, 2, 0, esp8266) == reject::kMalformed);
+  ProbeTargetRec nodns[1] = {target("d", ProbeKind::Dns)};
+  CHECK(validate_config(good_params(5), 4, nodns, 1, 0, esp8266) == reject::kMalformed);  // dns needs qname
+  ProbeTargetRec slow[1] = {target("s", ProbeKind::Icmp)};
+  slow[0].timeout_ms = 5000; slow[0].interval_ms = 4000;
+  CHECK(validate_config(good_params(5), 4, slow, 1, 0, esp8266) == reject::kRange);    // timeout >= interval
+  CHECK(validate_config(good_params(5), 4, t, 9, 0, esp8266) == reject::kTooMany);
+  CHECK(validate_config(good_params(5), 4, t, 3, 17, esp8266) == reject::kTooMany);
 }
 
 int main() {

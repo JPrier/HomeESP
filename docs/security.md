@@ -15,6 +15,7 @@
 | SSRF through probes | HTTP checks only to configured host/path, redirects never followed, body capped | `probes.rs` tests |
 | Supply chain | pinned toolchain/images, lockfiles, `cargo-deny` (advisories, licenses, sources) | CI |
 | Node credential theft | **ESP8266 has no flash encryption**: anyone with physical access can read LittleFS. Mitigation: per-node credentials revocable at the broker (`mosquitto_passwd -D`) | documented limitation |
+| API bearer token over plain HTTP on the LAN | the server speaks HTTP; tokens are sniffable on the LAN segment. Mitigations: API port limited to management hosts by firewall; viewer vs operator tokens; put a TLS reverse proxy in front or use a VPN for anything beyond a trusted LAN | documented limitation |
 | Plaintext MQTT on LAN | firmware 0.1.x has no TLS; broker listener bound to LAN + firewall-scoped; production template uses TLS 8883 for capable clients | documented limitation |
 
 ## Privacy

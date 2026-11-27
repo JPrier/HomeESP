@@ -2,8 +2,7 @@
 #
 # Production (host networking so the host firewall governs exposure explicitly):
 #   OBS_DIR=/home/observatory docker compose -f deploy/compose.yaml up -d broker server
-# Simulation demo (no real network probing, no hardware, no real credentials):
-#   docker compose -f deploy/compose.yaml --profile simulation up --build
+# Simulation demo: see deploy/compose.sim.yaml
 #
 # Layout of ${OBS_DIR}: config/site.yaml, secrets/*, data/, mosquitto/{mosquitto.conf,acl,passwd,data/}
 
@@ -57,30 +56,3 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-  # ---- simulation profile: isolated network, simulated nodes only ----
-  sim-broker:
-    profiles: [simulation]
-    image: eclipse-mosquitto:2.0.20
-    networks: [sim]
-    command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
-  sim-server:
-    profiles: [simulation]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    networks: [sim]
-    ports: ["127.0.0.1:8080:8080"]
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - >
-        mkdir -p /tmp/s && printf 'operator=sim-operator-token-0000000000\nviewer=sim-viewer-token-00000000000000\n' > /tmp/s/api_tokens &&
-        observatory-cli sim run --scenario S02 --export /tmp/s/capture.jsonl >/dev/null;
-        observatory-cli replay --input /tmp/s/capture.jsonl;
-        exec observatory-server --config /app/sim.yaml --simulate
-    volumes:
-      - ../configs/sim-demo.yaml:/app/sim.yaml:ro
-
-networks:
-  sim:
-    internal: true

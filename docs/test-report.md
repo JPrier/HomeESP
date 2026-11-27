@@ -9,7 +9,7 @@ engine — not field-verified.
 | Suite | Count | Result |
 |---|---:|---|
 | Rust workspace (`cargo test --workspace --locked`) — unit, property, golden, storage, collectors, integrations, server API integration, CLI, scenarios | 115 tests | PASS |
-| Firmware core host tests (C++17, `-Werror`, ASan/UBSan in CI) | 17 tests / 6,929 checks | PASS |
+| Firmware core host tests (C++17, `-Werror`, ASan/UBSan in CI) incl. desired-config validation | 18 tests / 6,943 checks | PASS |
 | Dashboard (Vitest + Testing Library) | 12 tests | PASS |
 | Python tools (pytest) | 4 tests | PASS |
 | Scenario sweep S01–S17 | 17 scenarios × 30 seeds = 510 runs | PASS (0 failures) |
@@ -98,6 +98,7 @@ redelivery invariants, time mapping never in the future, loss always in [0, 100]
 ## Known limitations
 
 - ESP8266: no BLE, no TLS (plaintext MQTT on LAN, firewall-scoped), no flash encryption, no OTA.
+- The HTTP API is plain HTTP: bearer tokens travel unencrypted on the LAN (firewall limits the port to management hosts; use a TLS proxy/VPN otherwise).
 - Localization accuracy is simulated only; the RF model is idealized.
 - Loss thresholds are conservative (99% Wilson bound); ~7% loss over 150 probes is needed to flag degradation.
 - Not run: 24 h soak, monitoring side-effect trial, live OPNsense/SNMP/HA, external watchdog, notifier to a real endpoint (only a local webhook sink was used).

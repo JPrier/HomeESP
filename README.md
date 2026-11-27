@@ -43,8 +43,8 @@ firmware/test/host/run.sh                      # C++ firmware core, golden vecto
 (cd dashboard && npm ci && npm run lint && npm run typecheck && npm test && npm run build)
 
 # Simulated end-to-end demo: synthetic nodes + scripted faults, no network probing
-docker compose -f deploy/compose.yaml --profile simulation up --build
-#   -> http://127.0.0.1:8080  token: sim-viewer-token-00000000000000
+docker compose -f deploy/compose.sim.yaml up --build
+#   -> http://127.0.0.1:18090  token: sim-viewer-token-00000000000000
 
 # Or without Docker
 observatory-server --config configs/sim-demo.yaml --simulate
