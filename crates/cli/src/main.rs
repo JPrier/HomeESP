@@ -121,6 +121,9 @@ enum NodeCmd {
         secrets: PathBuf,
         #[arg(long, default_value = "default")]
         profile: String,
+        /// Explicit path to tools/esp.py (default: the source tree this CLI was built from).
+        #[arg(long)]
+        tool: Option<PathBuf>,
     },
 }
 
@@ -141,8 +144,9 @@ fn main() -> Result<()> {
                     node_id,
                     secrets,
                     profile,
+                    tool,
                 },
-        } => provision(&serial, &node_id, &secrets, &profile),
+        } => provision(&serial, &node_id, &secrets, &profile, tool),
     }
 }
 
@@ -359,15 +363,22 @@ fn backup(cmd: BackupCmd) -> Result<()> {
     }
 }
 
-fn provision(serial: &str, node: &str, secrets: &std::path::Path, profile: &str) -> Result<()> {
+fn provision(
+    serial: &str,
+    node: &str,
+    secrets: &std::path::Path,
+    profile: &str,
+    tool: Option<PathBuf>,
+) -> Result<()> {
     if !ho_domain::valid_id(node) {
         bail!("invalid node id {node}");
     }
-    let tool = std::env::current_exe()?
-        .ancestors()
-        .map(|p| p.join("tools").join("esp.py"))
-        .find(|p| p.exists())
-        .unwrap_or_else(|| PathBuf::from("tools/esp.py"));
+    // Fixed location only: the source tree this binary was built from (compile-time
+    // path) or an explicit --tool. Never search parent dirs or the current directory.
+    let tool = tool.unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/esp.py"));
+    let tool = tool
+        .canonicalize()
+        .with_context(|| format!("provisioning tool not found: {}", tool.display()))?;
     eprintln!(
         "profile '{profile}' is applied by the server as desired config after the node connects"
     );
