@@ -162,7 +162,9 @@ async fn main() -> Result<()> {
         .filter(|d| d.join("index.html").exists());
     let app = Arc::new(Shared {
         cfg: cfg.clone(),
-        config_path: Some(args.config.clone()),
+        // Simulate mode overrides parts of the config in memory, so API config writes
+        // (which compare against the running config) are disabled there.
+        config_path: (!args.simulate).then(|| args.config.clone()),
         db_path,
         engine: Mutex::new(engine),
         snapshot: RwLock::new(snapshot),
