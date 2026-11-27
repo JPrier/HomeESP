@@ -136,6 +136,10 @@ async fn main() -> Result<()> {
         Some((rev, s)) if s == sha => rev,
         _ => store.save_config_revision(now_ms(), "startup", &sha, &text)?,
     };
+    let closed = store.close_stale_incidents(now_ms())?;
+    if closed > 0 {
+        tracing::info!(closed, "closed incidents left open by a previous run");
+    }
     let counter: u64 = store
         .kv_get("incident_counter")?
         .and_then(|v| v.parse().ok())

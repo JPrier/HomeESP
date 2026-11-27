@@ -690,20 +690,45 @@ void wifi_begin() {
   WiFi.begin(g_sec.wifi_ssid, g_sec.wifi_psk);
 }
 
+// A session must stay up this long before the reconnect backoff resets; shorter
+// sessions (flapping on a lossy link) keep backing off instead of storming.
+constexpr uint32_t kStableSessionMs = 60000;
+// lwmqtt blocks for CONNACK/SUBACK; on a lossy 2.4 GHz link TCP retransmits can
+// exceed a 2 s budget (observed: -4 timeouts followed by -9 on late packets).
+constexpr uint32_t kMqttCommandTimeoutMs = 10000;
+
 void mqtt_tick(uint32_t now) {
-  if (g_mqtt.connected()) { g_mqtt.loop(); return; }
-  if (WiFi.status() != WL_CONNECTED || (int32_t)(now - g_next_mqtt_try) < 0) return;
   static bool was_connected = false;
-  if (was_connected) { push_life(Lifecycle::MqttDisconnected, (uint16_t)g_mqtt.lastError(), nullptr, nullptr, false, 0); was_connected = false; }
+  static uint32_t session_start = 0;
+  if (g_mqtt.connected()) {
+    g_mqtt.loop();
+    if (session_start && now - session_start >= kStableSessionMs) {
+      g_mqtt_backoff.reset();
+      session_start = 0;  // reset once per stable session
+    }
+    return;
+  }
+  if (was_connected) {
+    push_life(Lifecycle::MqttDisconnected, (uint16_t)g_mqtt.lastError(), nullptr, nullptr, false, 0);
+    was_connected = false;
+    if (session_start) {
+      // Session ended before it became stable: wait before retrying.
+      uint32_t wait = g_mqtt_backoff.next();
+      g_next_mqtt_try = now + wait;
+      logf("mqtt session lasted %ums; retry in %ums", (unsigned)(now - session_start), (unsigned)wait);
+    }
+    session_start = 0;
+  }
+  if (WiFi.status() != WL_CONNECTED || (int32_t)(now - g_next_mqtt_try) < 0) return;
   g_mqtt.begin(g_sec.mqtt_host, g_sec.mqtt_port, g_net);
-  g_mqtt.setOptions(30, true, 2000);  // keepalive 30 s, clean session, 2 s command timeout
+  g_mqtt.setOptions(30, true, kMqttCommandTimeoutMs);  // keepalive 30 s, clean session
   g_mqtt.setWill(topic("status"), "offline", true, 1);
   char cid[48];
   snprintf(cid, sizeof cid, "ho-%s", g_sec.node_id);
   if (g_mqtt.connect(cid, g_sec.mqtt_user, g_sec.mqtt_pass)) {
-    g_mqtt_backoff.reset();
     g_reconnects++;
     was_connected = true;
+    session_start = now ? now : 1;
     // Subscribe to `ack` first: the retained desired config is delivered right after
     // its SUBACK, and lwmqtt aborts a blocking SUBSCRIBE that sees another packet.
     g_mqtt.subscribe(topic("ack"), 1);

@@ -450,6 +450,29 @@ impl Store {
         Ok(true)
     }
 
+    /// Close incidents left open/recovering by a previous process. The new engine
+    /// re-evaluates from fresh evidence (and re-opens under a new id if needed), so
+    /// stale rows must not stay "open" forever. Each closure is noted on the incident.
+    pub fn close_stale_incidents(&mut self, at: UnixMs) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let ids: Vec<(String, String)> = {
+            let mut st = tx
+                .prepare("SELECT id, notes FROM incidents WHERE status IN ('open','recovering')")?;
+            let rows = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        for (id, notes) in &ids {
+            let mut v: Vec<serde_json::Value> = serde_json::from_str(notes).unwrap_or_default();
+            v.push(serde_json::json!({"at": at, "actor": "system", "note": "closed at server restart; condition re-evaluated from fresh evidence"}));
+            tx.execute(
+                "UPDATE incidents SET status='resolved', resolved_at=?2, notes=?3 WHERE id=?1",
+                params![id, at, serde_json::to_string(&v)?],
+            )?;
+        }
+        tx.commit()?;
+        Ok(ids.len())
+    }
+
     pub fn acknowledge_incident(&mut self, id: &str) -> Result<bool> {
         Ok(self
             .conn

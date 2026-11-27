@@ -253,3 +253,21 @@ fn rejects_future_schema() {
     }
     assert!(matches!(Store::open(&db), Err(StoreError::TooNew { .. })));
 }
+
+#[test]
+fn stale_incidents_are_closed_with_a_note() {
+    let mut s = Store::open_in_memory().unwrap();
+    s.conn()
+        .execute_batch(
+            "INSERT INTO incidents (id,key,status,severity,episode,flaps,opened_at,last_evidence_at,hypothesis) VALUES ('inc-1','k','open','warning',1,0,1,1,'{}');
+             INSERT INTO incidents (id,key,status,severity,episode,flaps,opened_at,last_evidence_at,resolved_at,hypothesis) VALUES ('inc-2','k2','resolved','warning',1,0,1,1,2,'{}');",
+        )
+        .unwrap();
+    assert_eq!(s.close_stale_incidents(99).unwrap(), 1);
+    let rows = s.incidents(Some("open"), 10).unwrap();
+    assert!(rows.is_empty());
+    let all = s.incidents(None, 10).unwrap();
+    let i1 = all.iter().find(|r| r["id"] == "inc-1").unwrap();
+    assert_eq!(i1["resolved_at"], 99);
+    assert!(i1["notes"].to_string().contains("server restart"));
+}
